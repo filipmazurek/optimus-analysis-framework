@@ -1,0 +1,14 @@
+name: oaf
+channels:
+  - conda-forge
+dependencies:
+  - networkx
+  - numpy
+  - matplotlib
+  - seaborn
+  - pip
+  - pip:
+      # Install SPA library from GitHub using SSH
+      - "git+ssh://git@github.com/filipmazurek/spa-library@v0.0.1"
+      # Local installation
+      - -e ./
