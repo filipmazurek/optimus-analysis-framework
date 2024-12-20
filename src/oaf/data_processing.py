@@ -6,8 +6,8 @@ from oaf.util import validate_check_data, validate_wave_data
 
 def split_data_by_wave(wave_data: list[dict]):
     """
-    Sort and split simulation data into sublists where each list begins with a timed\_trigger=True entry.
-    If the first entry is not timed\_trigger=True, it will be ignored.
+    Sort and split simulation data into sublists where each list begins with a timed_trigger=True entry.
+    If the first entry is not timed_trigger=True, it will be ignored.
 
     :param wave_data: The raw simulation data.
     :return: Sorted and split simulation data.
@@ -64,30 +64,35 @@ def organize_check_data_by_wave(wave_data, check_data):
     return organized_results
 
 
-def find_co_occurring_failures(wave_data, check_data):
+def find_co_occurring_failures(wave_data, nodes):
     """
     Find the co-occuring failures for each wave in Optimus
 
     :param wave_data: list of dict: List of wave data information.
-    :param check_data: dict of list of dict: Check data organized by base trigger wave.
-    :return:
+    :return: dict of node tuples and their co-occurrence count.
     """
-    validate_check_data(check_data)
     validate_wave_data(wave_data)
 
-    check_data_by_wave = organize_check_data_by_wave(wave_data, check_data)
+    split_wave_data = split_data_by_wave(wave_data)
 
-    cooccurrence_matrix = defaultdict(int)
+    cooccurrence_matrix = {}
+    # Add all node combinations to the matrix
+    for node1, node2 in combinations(nodes, 2):
+        # Keep the pair sorted to ensure consistent key ordering
+        pair = tuple(sorted((node1, node2)))
+        cooccurrence_matrix[pair] = 0
 
-    # Iterate through base trigger waves
-    for base_wave, wave_data in check_data_by_wave.items():
-        # Filter out nodes that did not fail
-        failing_nodes = [entry['node'] for entry in wave_data
-                         if entry['failure_magnitude'] > 0 and entry['check_type'] == 'check_data']
+    # Look through every set of diagnosis waves
+    for wave in split_wave_data:
+        failing_nodes = []
+        # All nodes that fail check_data will start a diagnosis wave with the node as the root
+        for entry in wave:
+            if entry['timed_trigger']:
+                continue
+            failing_nodes += entry['root_nodes']
 
-        # Count co-occurrences of failing nodes
-        for node1, node2 in combinations(failing_nodes, 2):  # Generate all pairs
-            pair = tuple(sorted((node1, node2)))  # Sort to ensure consistent key ordering
+        for node1, node2 in combinations(failing_nodes, 2):
+            pair = tuple(sorted((node1, node2)))
             cooccurrence_matrix[pair] += 1
 
-    return dict(cooccurrence_matrix)
+    return cooccurrence_matrix

@@ -8,8 +8,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from plotting.test_data.data import fetch_large_sim_data
 
 
-data, _, graph = fetch_large_sim_data()
-base_failure_stats = find_base_failures(data, graph)
+wave_data, _, graph = fetch_large_sim_data()
+base_failure_stats = find_base_failures(wave_data, graph)
 
 failure_chain_lengths = find_mean_failure_chain_length(base_failure_stats, graph)
 plot(failure_chain_lengths)

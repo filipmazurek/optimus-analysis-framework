@@ -1,39 +1,38 @@
 from collections import defaultdict
 import matplotlib.pyplot as plt
-import networkx as nx
 import pandas as pd
 import seaborn as sns
 
-from oaf.util import validate_check_data
+from oaf.util import validate_wave_data
 
 
-def calculate_time_to_failure(check_data, graph: nx.DiGraph):
+def calculate_time_to_failure(wave_data, nodes):
     """
-    Calculate the time to failure for each node from check_data.
+    Calculate the time to failure for each node.
 
-    :param check_data: list of dict: Simulation data with 'node', 'check_type', 'wave', and 'failure_magnitude'.
+    :param wave_data: list of dict: List of wave data dicts
+    :param nodes: list of str: List of node names
     :return: dict: {node: [time_to_failure]} where each value is a list of intervals between failures.
     """
-    # Assert given check_data
-    validate_check_data(check_data)
-
-    nodes = graph.nodes
+    validate_wave_data(wave_data)
 
     time_to_failure = {node: [] for node in nodes}
     last_fail_time = {}
 
-    for entry in check_data:
-        node = entry['node']
+    for entry in wave_data:
+        # Skip timed triggers, as they are not failures
+        if entry['timed_trigger']:
+            continue
+        # Any diagnosis wave root nodes are failures
+        assert len(entry['root_nodes']) == 1, "Multiple root nodes in a diagnosis wave."
+        node = entry['root_nodes'][0]
         wave = entry['wave']
-        check_type = entry['check_type']
-        failure_magnitude = entry['failure_magnitude']
 
-        if check_type == "check_data" and failure_magnitude > 0:
-            if node in last_fail_time:
-                # Record the time since the last successful calibration or start
-                time_to_failure[node].append(wave - last_fail_time[node])
-            # Update the last check time to the failure wave
-            last_fail_time[node] = wave
+        if node in last_fail_time:
+            # Record the time since the last successful calibration or start
+            time_to_failure[node].append(wave - last_fail_time[node])
+        # Update the last check time to the failure wave
+        last_fail_time[node] = wave
 
     return time_to_failure
 

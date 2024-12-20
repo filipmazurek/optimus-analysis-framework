@@ -50,7 +50,7 @@ def calculate_check_scores(wave_data, check_data, graph):
     # Co-failure correlation
 
     # Calculate the co-occuring failures for each wave
-    co_occurring_data = find_co_occurring_failures(wave_data, check_data)
+    co_occurring_data = find_co_occurring_failures(wave_data, nodes)
 
     for node in graph.nodes:
         cofailure_score = sum(

@@ -7,8 +7,8 @@ from plotting.test_data.data import fetch_manual_data
 
 sim_data_num = 3
 # Fetch sim data
-data, _, node_graph = fetch_manual_data(sim_data_num)
+wave_data, _, node_graph = fetch_manual_data(sim_data_num)
 
 # Plot all waves
-prepped_data = prep_data(data)
+prepped_data = prep_data(wave_data)
 plot(prepped_data, node_graph)

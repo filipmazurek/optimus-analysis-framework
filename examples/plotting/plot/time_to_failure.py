@@ -8,7 +8,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from plotting.test_data.data import fetch_large_sim_data
 
 # Fetch sim data®
-_, check_data, node_graph = fetch_large_sim_data()
+wave_data, _, graph = fetch_large_sim_data()
 
-time_to_failure = calculate_time_to_failure(check_data, node_graph)
+time_to_failure = calculate_time_to_failure(wave_data, graph.nodes())
 plot(time_to_failure)

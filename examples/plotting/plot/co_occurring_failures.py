@@ -7,9 +7,9 @@ from plotting.test_data.data import fetch_large_sim_data
 from oaf.data_processing import find_co_occurring_failures
 from oaf.plot.co_occuring_failures import plot
 
-wave_data, check_data, graph = fetch_large_sim_data()
+wave_data, _, graph = fetch_large_sim_data()
 
 # Calculate the co-occurring failures for each wave
-co_occurring_data = find_co_occurring_failures(wave_data, check_data)
+co_occurring_data = find_co_occurring_failures(wave_data, graph.nodes())
 
 plot(co_occurring_data, graph.nodes())
