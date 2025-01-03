@@ -50,9 +50,10 @@ def plot_base_failure_heatmap(base_failure_proportions, nodes):
     plt.show()
 
 
-def plot_combined_heatmap(base_failure_counts, nodes):
+def plot(base_failure_counts, nodes):
     """
     Plot a combined heatmap of base failure proportions and raw counts.
+    This is the default plotting option for base failure analysis.
 
     Args:
         base_failure_counts (dict): Raw counts of failures per downstream node.
