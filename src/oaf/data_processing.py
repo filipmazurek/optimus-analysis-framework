@@ -1,7 +1,124 @@
+import networkx as nx
 from collections import defaultdict
 from itertools import combinations
 
 from oaf.util import validate_check_data, validate_wave_data
+from oaf.base_failure import find_base_failure_for_wave
+
+
+def time_to_failure(wave_data: list[dict], nodes: list[str]):
+    """
+    Find the time to failure for each node in the wave data.
+
+    :param wave_data: Per-wave data
+    :return: The time to failure for each node.
+    """
+    validate_wave_data(wave_data)
+    time_to_failure = {node: [] for node in nodes}
+
+    # Sort wave data by wave number
+    wave_data.sort(key=lambda x: x['wave'])
+
+    # Discard the first items in wave_data until the first timed_trigger=True entry
+    while wave_data and not wave_data[0]['timed_trigger']:
+        wave_data.pop(0)
+
+    # Set up time_of_last_failure for each node. Default value is the beginning of the time period where everything is
+    #   assumed to be newly calibrated.
+    time_of_last_failure = {node: wave_data[0]['wave'] for node in nodes}
+
+    # Iterate through the wave data, checking when each node failed
+    for entry in wave_data:
+        if entry['timed_trigger']:
+            continue
+        for node in entry['root_nodes']:
+            time_to_failure[node].append(entry['wave'] - time_of_last_failure[node])
+            time_of_last_failure[node] = entry['wave']
+
+    return time_to_failure
+
+
+def time_to_failure_base(wave_data: list[dict], graph: nx.DiGraph):
+    """
+    Find the time to base failure for each node in the wave data.
+
+    :param wave_data: Per-wave data
+    :param graph: The graph representing node relationships.
+    :return: The time to base failure for each node.
+    """
+    validate_wave_data(wave_data)
+    time_to_base_failure = {node: [] for node in graph.nodes}
+
+    # Sort wave data by wave number
+    # TODO: consodlidate all `sort` and `sorted` calls. This is messy.
+    wave_data.sort(key=lambda x: x['wave'])
+
+    # Set up time_of_last_failure for each node. Default value is the beginning of the time period where everything is
+    #   assumed to be newly calibrated.
+    time_of_last_failure = {node: wave_data[0]['wave'] for node in graph.nodes}
+
+    split_wave_data = split_data_by_wave(wave_data)
+
+    # Iterate through each wave, finding the time to base failure for each node
+    for wave in split_wave_data:
+        # Assume this to be the wave time for failure of these nodes
+        failure_time = wave[0]['wave']
+
+        # Get base failure causes for each case
+        base_failures = find_base_failure_for_wave(wave, graph)
+
+        base_failure_nodes = set(base_failures.values())
+
+        for node in base_failure_nodes:
+            time_to_base_failure[node].append(failure_time - time_of_last_failure[node])
+            time_of_last_failure[node] = failure_time
+
+    return time_to_base_failure
+
+
+def count_failures(wave_data: list[dict], nodes: list[str]):
+    """
+    Count the number of failures per node using the wave data.
+    This is intended for any time period in the wave data, to be used for SPA to find a CI for the number of failures in
+    a given time period.
+
+    :param wave_data: Raw per-wave simulation data.
+    :return: The number of failures per node.
+    """
+    validate_wave_data(wave_data)
+    node_failure_counts = {node: 0 for entry in wave_data for node in nodes}
+
+    for entry in wave_data:
+        if entry['timed_trigger']:
+            continue
+        for node in entry['root_nodes']:
+            node_failure_counts[node] += 1
+
+    return node_failure_counts
+
+
+def count_base_failures(wave_data: list[dict], graph:nx.DiGraph):
+    """
+    Count the number of base failures per node using the wave data.
+    This is intended for any time period in the wave data, to be used for SPA to find a CI for the number of base
+    failures in a given time period.
+
+    :param wave_data: Raw per-wave simulation data.
+    :param graph: The graph representing node relationships.
+    :return: The number of base failures per node.
+    """
+    validate_wave_data(wave_data)
+    base_failure_counts = {node: 0 for entry in wave_data for node in graph.nodes}
+
+    split_wave_data = split_data_by_wave(wave_data)
+
+    for wave in split_wave_data:
+        # Get base failure causes for each case
+        base_failures = find_base_failure_for_wave(wave, graph)
+        for node in base_failures.values():
+            base_failure_counts[node] += 1
+
+    return base_failure_counts
 
 
 def split_data_by_wave(wave_data: list[dict]):

@@ -24,6 +24,7 @@ def calculate_time_to_failure(wave_data, nodes):
         if entry['timed_trigger']:
             continue
         # Any diagnosis wave root nodes are failures
+        # TODO: this is unnecessary
         assert len(entry['root_nodes']) == 1, "Multiple root nodes in a diagnosis wave."
         node = entry['root_nodes'][0]
         wave = entry['wave']

@@ -31,6 +31,16 @@ class Node(ABC):
             'failure_magnitude': self.failure_magnitude
         }
 
+    def get_all_data(self):
+        """Reserved function to get all data from the node"""
+        pass
+
+    def calibrate(self, time):
+        """Calibrate the node"""
+        self.failed = False
+        self.last_calibration = time
+        self.failure_magnitude = 0
+
 
 class SimpleNode(Node):
     """
@@ -137,3 +147,132 @@ class TrendNode(Node):
         # Simulate failure magnitude
         if self.failed:
             self.failure_magnitude = 1 + int(abs(self.check_data - self.threshold) > self.noise_std)
+
+
+class ExpDecayFuncNode(Node):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # Default values
+        defaults = {
+            'amp': 1.0,
+            'decay_time': 10.0,  # time in µs
+            'background': 0.0,
+            'threshold': 0.992,  # Acceptable population threshold. Desire 99.9%
+            # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
+            'amp_drift_rate': 0.01,
+            # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
+            'amp_drift_bias': 0.5,
+            'decay_time_drift_rate': 0.1,
+            'decay_time_drift_bias': 0.5,
+            'background_drift_rate': 0.001,
+            'background_drift_bias': 0.5
+        }
+
+        # Override defaults with kwargs if provided
+        for key, default in defaults.items():
+            setattr(self, key, kwargs.get(key, default))
+
+        self.parameters = [
+            'amp',
+            'decay_time',
+            'background',
+        ]
+        self.initial_params = {
+            'amp': self.amp,
+            'decay_time': self.decay_time,
+            'background': self.background,
+        }
+        self.current_params = self.initial_params.copy()
+        self.threshold = self.threshold
+        self.drift_rates = {
+            'amp': self.amp_drift_rate,
+            'decay_time': self.decay_time_drift_rate,
+            'background': self.background_drift_rate,
+        }
+        self.drift_biases = {
+            'amp': self.amp_drift_bias,
+            'decay_time': self.decay_time_drift_bias,
+            'background': self.background_drift_bias,
+        }
+        self.parameter_min_values = {
+            'amp': 0.1,
+            'decay_time': 0.1,
+            'background': 0.0,
+        }
+
+        # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
+        self.params_at_calibration = []
+
+    def exp_decay(self, time):
+        amp = self.current_params['amp']
+        decay_time = self.current_params['decay_time']
+        background = self.current_params['background']
+        return amp * np.exp(-time / decay_time) + background
+
+    def drift_parameters(self):
+        for param in self.parameters:
+            # Decide drift direction
+            if np.random.uniform() < self.drift_biases[param]:
+                direction = 1
+            else:
+                direction = -1
+            drift = direction * self.drift_rates[param] * np.random.uniform()
+            self.current_params[param] = max(self.parameter_min_values[param], self.current_params[param] + drift)
+
+    def _check_value(self):
+        """
+        Check data at the 99.9% decay point
+        """
+        time_point = -self.current_params['decay_time'] * np.log(1 - .999)
+        value = self.exp_decay(time_point)
+
+        return value
+
+    def run_check(self):
+        """
+        Perform the check at the 99.9% decay point and evaluate results.
+        """
+        value = self._check_value()
+        result = (1 - value) > self.threshold
+
+        return result
+
+    def calibrate(self, time):
+        super().calibrate(time)
+
+        # Save the parameters right before calibration
+        current_params = self.current_params.copy()
+        current_params['wave'] = time
+        self.params_at_calibration.append(current_params)
+
+        # Reset to initial parameters
+        self.current_params = self.initial_params.copy()
+
+    def _check_failure_magnitude(self):
+        """
+        Check failure magnitude based on how close the value is to the threshold.
+        """
+        value = self._check_value()
+        if self.threshold - (1 - value) < 0.:
+            return 0
+        if self.threshold - (1 - value) < 0.01:
+            return 1
+        else:
+            return 2
+
+    def simulate_failure(self):
+        # Used every step of the simulation, therefore must include drift
+        # Simulate drift
+        self.drift_parameters()
+
+        # A node can drift out of and back into spec. Allow it to do so.
+        self.check_data = self._check_value()
+        result = self.run_check()
+        self.failed = not result
+        self.failure_magnitude = self._check_failure_magnitude()
+
+    def get_all_data(self):
+        super().get_all_data()
+
+        return self.params_at_calibration

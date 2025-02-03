@@ -1,6 +1,6 @@
 from oaf.optimus_simulator.node import Node
 
-
+# TODO: Timeout is currently not used. Implement timeout functionality
 class QuantumCalibrationSimulator:
     """
     A simple simulator for the Optimus algorithm. This simulator holds a number of nodes, each of which can fail
@@ -74,6 +74,15 @@ class QuantumCalibrationSimulator:
 
         return dependency_nodes
 
+    def _check_failure(self, node):
+        """Check if any of the node's dependencies have failed. If so, the node is marked as failed as well."""
+        # Check if the node has already failed
+        if node.failed:
+            return True
+        # Check if any of the node's dependencies have failed
+        dependencies = self._get_all_dependencies(node.name)
+        return any(self.nodes[dep].failed for dep in dependencies)
+
     def _submit_timed_trigger(self, timed_out_nodes):
         """Handles submission of nodes that timed out."""
         submitted_nodes = []
@@ -143,7 +152,7 @@ class QuantumCalibrationSimulator:
         # Get all the check_data information from the node
         node_check_data = node.get_check_data()
 
-        if not node.failed:
+        if not self._check_failure(node):
             check_data_results += [{
                 'wave': self.current_time + check_offest * 0.001,
                 'node': check_node,
@@ -164,9 +173,7 @@ class QuantumCalibrationSimulator:
         failure_magnitude = node.failure_magnitude
 
         # Recalibrate this node
-        node.failed = False
-        node.last_calibration = self.current_time  # + wave_offset * 0.001
-        node.failure_magnitude = 0
+        node.calibrate(self.current_time)
 
         # Wave data from this node
         wave_data += [{

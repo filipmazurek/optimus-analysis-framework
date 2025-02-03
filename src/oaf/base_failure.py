@@ -7,9 +7,10 @@ from oaf.data_processing import split_data_by_wave
 from oaf.util import validate_wave_data
 
 
-def _find_base_failure(wave_data, graph):
+def find_base_failure_for_wave(wave_data, graph):
     """
     For a single trigger wave and possible diagnose waves, find the base cause of downstream failure.
+    Note that this is only for a single wave and its diagnosis wave, not for all wave data.
 
     :param wave_data: list of dict: Wave data.
     :param graph: nx.DiGraph: The graph representing node relationships.
@@ -78,7 +79,7 @@ def find_base_failures(wave_data, graph):
 
     for wave in split_wave_data:
         # Get base failure causes for each case
-        base_failures = _find_base_failure(wave, graph)
+        base_failures = find_base_failure_for_wave(wave, graph)
 
         # Update the failure statistics
         for node, base_causes in base_failures.items():
