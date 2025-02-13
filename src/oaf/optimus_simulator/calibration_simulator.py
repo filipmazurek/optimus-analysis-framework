@@ -76,8 +76,10 @@ class QuantumCalibrationSimulator:
 
     def _check_failure(self, node):
         """Check if any of the node's dependencies have failed. If so, the node is marked as failed as well."""
+        # Perform `check_data` on the node
+        failed = node.check_data(self.current_time)
         # Check if the node has already failed
-        if node.failed:
+        if failed:
             return True
         # Check if any of the node's dependencies have failed
         dependencies = self._get_all_dependencies(node.name)

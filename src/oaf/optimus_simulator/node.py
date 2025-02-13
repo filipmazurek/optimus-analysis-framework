@@ -13,12 +13,46 @@ class Node(ABC):
         assert 'timeout' in kwargs
 
         self.name = kwargs['name']
+        self.base_timeout = kwargs['timeout']
         self.timeout = kwargs['timeout']
         self.failed = False
         self.last_calibration = 0.
         self.last_check = 0.
         self.failure_magnitude = 0  # 0: No failure, 1: Minor failure, 2: Major failure
-        self.check_data = None
+        self.check_data_value = None
+
+        # Flags for timeout-aware adaptive Optimus
+        self.first_check_delayed_flag = False
+        self.long_lived_flag = False
+
+        if 'delay_first_check' in kwargs:
+            assert isinstance(kwargs['delay_first_check'], bool)
+            self.delay_first_check = kwargs['delay_first_check']
+        else:
+            self.delay_first_check = False
+
+        if self.delay_first_check:
+            assert 'fifth_percentile_ttf' in kwargs
+            self.fifth_percentile_ttf = kwargs['fifth_percentile_ttf']
+
+        if 'check_long_lived_nodes' in kwargs:
+            assert isinstance(kwargs['check_long_lived_nodes'], bool)
+            self.check_long_lived_nodes = kwargs['check_long_lived_nodes']
+        else:
+            self.check_long_lived_nodes = False
+
+        if self.check_long_lived_nodes:
+            assert 'ninety_fifth_percentile_ttf' in kwargs
+            self.ninety_fifth_percentile_ttf = kwargs['ninety_fifth_percentile_ttf']
+
+        if 'fifth_percentile_ttf' in kwargs and 'ninety_fifth_percentile_ttf' in kwargs:
+            assert self.ninety_fifth_percentile_ttf > self.fifth_percentile_ttf > 0.
+
+    def modify_timeout(self, new_timeout):
+        self.timeout = new_timeout
+
+    def reset_to_initial_timeout(self):
+        self.timeout = self.base_timeout
 
     def simulate_failure(self):
         """Simulate failure for the node. Typically done at every timestep of the sim."""
@@ -27,7 +61,7 @@ class Node(ABC):
     def get_check_data(self):
         """Get the most recent check data for the node"""
         return {
-            'data': self.check_data,
+            'data': self.check_data_value,
             'failure_magnitude': self.failure_magnitude
         }
 
@@ -35,12 +69,39 @@ class Node(ABC):
         """Reserved function to get all data from the node"""
         pass
 
+    def check_data(self, time):
+        failed = self.failed
+
+        # If the timeout was increased and this is the first check since then, reset the timeout
+        if self.first_check_delayed_flag:
+            self.first_check_delayed_flag = False
+            self.timeout = self.base_timeout
+
+        # If the node is long-lived, check if the 95th percentile ttf is greater than the current wait time value
+        if self.check_long_lived_nodes and not self.long_lived_flag:
+            time_alive = max(self.last_calibration, self.last_check) - time
+            if time_alive > self.ninety_fifth_percentile_ttf:
+                # TODO: set values that make sense
+                self.modify_timeout(self.tiemout / 2)
+                self.long_lived_flag = True
+
+        return failed
+
     def calibrate(self, time):
         """Calibrate the node"""
         self.failed = False
         self.last_calibration = time
         self.failure_magnitude = 0
 
+        self.long_lived_flag = False
+
+        # Perform adaptive Optimus timeout adjustment
+        if self.delay_first_check:
+            # If the 5th percentile ttf is much greater than the current timeout, increase the timeout
+            # TODO: set values that make sense
+            if self.fifth_percentile_ttf > 3 * self.timeout:
+                self.modify_timeout(self.fifth_percentile_ttf / 3)
+                self.first_check_delayed_flag = True
 
 class SimpleNode(Node):
     """
@@ -57,8 +118,8 @@ class SimpleNode(Node):
         if self.failed:
             return
 
-        self.check_data = random.random()
-        self.failed = self.check_data < self.failure_prob
+        self.check_data_value = random.random()
+        self.failed = self.check_data_value < self.failure_prob
         # Create a random integer (0 to 2) to simulate the magnitude of the failure
         if self.failed:
             self.failure_magnitude = random.randint(1, 2)
@@ -84,7 +145,7 @@ class DistributionThresholdNode(Node):
         self.num_samples = kwargs['num_samples']
         self.threshold = kwargs['threshold']
         self.comparison_func = kwargs['comparison_func']
-        self.check_data = []
+        self.check_data_value = []
         self.metadata = {'dist_mean': self.dist_mean, 'dist_std': self.dist_std, 'num_samples': self.num_samples}
         # Select the distribution function
         if dist_type == 'normal':
@@ -105,10 +166,10 @@ class DistributionThresholdNode(Node):
             return
 
         # Generate random data
-        self.check_data = self.dist_func(self.dist_mean, self.dist_std, self.num_samples)
+        self.check_data_value = self.dist_func(self.dist_mean, self.dist_std, self.num_samples)
 
         # Use the comparison function to determine if the node failed
-        self.failed = self.comparison_func(list(self.check_data), self.threshold)
+        self.failed = self.comparison_func(list(self.check_data_value), self.threshold)
 
         # Check failure magnitude
         if self.failed:
@@ -127,7 +188,7 @@ class TrendNode(Node):
         assert 'noise_std' in kwargs, "'noise_std' is required for TrendNode."
         assert 'threshold' in kwargs, "'threshold' is required for TrendNode."
 
-        self.check_data = kwargs['initial_value']
+        self.check_data_value = kwargs['initial_value']
         self.drift_rate = kwargs['drift_rate']
         self.noise_std = kwargs['noise_std']
         self.threshold = kwargs['threshold']
@@ -139,14 +200,14 @@ class TrendNode(Node):
         # Simulate drift and noise
         drift = self.drift_rate
         noise = np.random.normal(0, self.noise_std)
-        self.check_data += drift + noise
+        self.check_data_value += drift + noise
 
         # Determine failure
-        self.failed = self.check_data > self.threshold
+        self.failed = self.check_data_value > self.threshold
 
         # Simulate failure magnitude
         if self.failed:
-            self.failure_magnitude = 1 + int(abs(self.check_data - self.threshold) > self.noise_std)
+            self.failure_magnitude = 1 + int(abs(self.check_data_value - self.threshold) > self.noise_std)
 
 
 class ExpDecayFuncNode(Node):
@@ -267,7 +328,7 @@ class ExpDecayFuncNode(Node):
         self.drift_parameters()
 
         # A node can drift out of and back into spec. Allow it to do so.
-        self.check_data = self._check_value()
+        self.check_data_value = self._check_value()
         result = self.run_check()
         self.failed = not result
         self.failure_magnitude = self._check_failure_magnitude()

@@ -46,7 +46,7 @@ def plot(ci_per_node, time_period=None, filename=None, failure_type='all'):
     ax.set_yticklabels(nodes)
 
     # Expand x-axis limits slightly for clarity
-    ax.set_xlim(min(ci_lows) * 0.9, max(ci_highs) * 1.1)
+    ax.set_xlim(np.nanmin(ci_lows) * 0.9, np.nanmax(ci_highs) * 1.1)
 
     # Annotate actual values
     for i, (low, high) in enumerate(zip(ci_lows, ci_highs)):
