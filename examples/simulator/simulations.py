@@ -126,6 +126,7 @@ if __name__ == '__main__':
     # Retrieve simulation data
     wave_data = simulator.get_wave_data()
     check_data_results = simulator.get_check_data_results()
+    ground_truth = simulator.get_ground_truth()
 
     # Sort the simulation data by wave
     wave_data.sort(key=lambda x: x['wave'])
@@ -139,5 +140,9 @@ if __name__ == '__main__':
     print("\n=== Check Data Results ===")
     for check_data_result in check_data_results:
         print(check_data_result)
+
+    print("\n=== Ground Truth ===")
+    for gt in ground_truth:
+        print(gt)
 
     # Ideally, this data would be saved to a file for further analysis

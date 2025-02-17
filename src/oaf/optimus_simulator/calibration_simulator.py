@@ -34,10 +34,18 @@ class QuantumCalibrationSimulator:
         self.nodes = nodes
         self.wave_offset = 0  # Global offset to avoid workarounds for diagnosis wave separation
         self.current_time = 0.
+        self.ground_truth = []
 
     def simulate(self, total_time_steps):
         """Run the simulation for a number of time steps."""
         while self.current_time < total_time_steps:
+
+            # Step 0: Check all node correctness values and record. Simulation base truth
+            current_ground_truth = {'time': self.current_time}
+            for node_name, node in self.nodes.items():
+                current_ground_truth[node_name] = not node.failed
+            self.ground_truth.append(current_ground_truth)
+
             # Step 1: Check for timed out nodes
             timed_out_nodes = [
                 node_name for node_name, node in self.nodes.items()
@@ -209,3 +217,7 @@ class QuantumCalibrationSimulator:
     def get_check_data_results(self):
         """Get the failure data."""
         return self.check_data_results
+
+    def get_ground_truth(self):
+        """Get the ground truth data."""
+        return self.ground_truth

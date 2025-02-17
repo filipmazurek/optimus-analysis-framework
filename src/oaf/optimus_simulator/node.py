@@ -210,6 +210,147 @@ class TrendNode(Node):
             self.failure_magnitude = 1 + int(abs(self.check_data_value - self.threshold) > self.noise_std)
 
 
+class Sin2FuncNode(Node):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # Default values
+        defaults = {
+            'omega': 1.0,
+            'time': 1.0,  # arbitrary time unit
+            'delta': 0.0,  # delta for cos2 error term
+            'background': 0.0,  # experimental error. Should be < 0
+            'threshold': 0.992,  # Acceptable population threshold
+            # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
+            'omega_drift_rate': 0.01,
+            # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
+            'omega_drift_bias': 0.5,
+            'time_drift_rate': 0.1,
+            'time_drift_bias': 0.5,
+            'background_drift_rate': 0.001,
+            'background_drift_bias': 0.5
+        }
+
+        # Override defaults with kwargs if provided
+        for key, default in defaults.items():
+            setattr(self, key, kwargs.get(key, default))
+
+        self.parameters = [
+            'omega',
+            'time',
+            'delta',
+            'background'
+        ]
+        self.initial_params = {
+            'omega': self.omega,
+            'time': self.time,
+            'delta': self.delta,
+            'background': self.background
+        }
+        self.current_params = self.initial_params.copy()
+        self.threshold = self.threshold
+        self.drift_rates = {
+            'omega': self.omega_drift_rate,
+            'time': self.time_drift_rate,
+            'delta': self.delta_drift_rate,
+            'background': self.background_drift_rate,
+        }
+        self.drift_biases = {
+            'omega': self.omega_drift_bias,
+            'time': self.time_drift_bias,
+            'delta': self.delta_drift_bias,
+            'background': self.background_drift_bias,
+        }
+        self.parameter_min_values = {
+            'omega': 0.1,
+            'time': 0.1,
+            'delta': -100.,
+            'background': -100.,
+        }
+
+        self.parameter_max_values = {
+            'omega': 100.,
+            'time': 100.,
+            'delta': 100.,
+            'background': 0.,
+        }
+
+        # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
+        self.params_at_calibration = []
+
+    def sin2_with_error(self, time):
+        omega = self.current_params['omega']
+        time = self.current_params['time']
+        delta = self.current_params['delta']
+        background = self.current_params['background']
+        return np.sin(omega * np.pi * time) ** 2 * np.cos(delta) ** 2 + background
+
+    def drift_parameters(self):
+        for param in self.parameters:
+            # Decide drift direction
+            if np.random.uniform() < self.drift_biases[param]:
+                direction = 1
+            else:
+                direction = -1
+            drift = direction * self.drift_rates[param] * np.random.uniform()
+            # Ensure that the new parameter is between the max and min values
+            new_param = self.current_params[param] + drift
+            new_param = max(self.parameter_min_values[param], new_param)
+            self.current_params[param] = min(self.parameter_max_values[param], new_param)
+
+    def _check_value(self):
+        """
+        Check data at the desired point
+        """
+        return self.sin2_with_error()
+
+    def run_check(self):
+        """
+        Perform the check at the 99.9% decay point and evaluate results.
+        """
+        value = self._check_value()
+        return value > self.threshold
+
+    def calibrate(self, time):
+        super().calibrate(time)
+
+        # Save the parameters right before calibration
+        current_params = self.current_params.copy()
+        current_params['wave'] = time
+        self.params_at_calibration.append(current_params)
+
+        # Reset to initial parameters
+        self.current_params = self.initial_params.copy()
+
+    def _check_failure_magnitude(self):
+        """
+        Check failure magnitude based on how close the value is to the threshold.
+        """
+        value = self._check_value()
+        if self.threshold - (1 - value) < 0.:
+            return 0
+        if self.threshold - (1 - value) < 0.01:
+            return 1
+        else:
+            return 2
+
+    def simulate_failure(self):
+        # Used every step of the simulation, therefore must include drift
+        # Simulate drift
+        self.drift_parameters()
+
+        # A node can drift out of and back into spec. Allow it to do so.
+        self.check_data_value = self._check_value()
+        result = self.run_check()
+        self.failed = not result
+        self.failure_magnitude = self._check_failure_magnitude()
+
+    def get_all_data(self):
+        super().get_all_data()
+
+        return self.params_at_calibration
+
+
 class ExpDecayFuncNode(Node):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -227,20 +368,27 @@ class ExpDecayFuncNode(Node):
             'decay_time_drift_rate': 0.1,
             'decay_time_drift_bias': 0.5,
             'background_drift_rate': 0.001,
-            'background_drift_bias': 0.5
+            'background_drift_bias': 0.5,
+            'time_drift_rate': 0.,
+            'time_drift_bias': 0.5
         }
 
         # Override defaults with kwargs if provided
         for key, default in defaults.items():
             setattr(self, key, kwargs.get(key, default))
 
+        # Calculate the time parameter based on the decay time. Drifts in time here model drifts in the control
+        self.time = -self.decay_time * np.log(1 - .999)
+
         self.parameters = [
             'amp',
+            'time',
             'decay_time',
             'background',
         ]
         self.initial_params = {
             'amp': self.amp,
+            'time': self.time,
             'decay_time': self.decay_time,
             'background': self.background,
         }
@@ -248,25 +396,36 @@ class ExpDecayFuncNode(Node):
         self.threshold = self.threshold
         self.drift_rates = {
             'amp': self.amp_drift_rate,
+            'time': self.time_drift_rate,
             'decay_time': self.decay_time_drift_rate,
             'background': self.background_drift_rate,
         }
         self.drift_biases = {
             'amp': self.amp_drift_bias,
+            'time': self.time_drift_bias,
             'decay_time': self.decay_time_drift_bias,
             'background': self.background_drift_bias,
         }
         self.parameter_min_values = {
             'amp': 0.1,
+            'time': 0.0001,
             'decay_time': 0.1,
-            'background': 0.0,
+            'background': -100.,
+        }
+
+        self.parameter_max_values = {
+            'amp': 100.,
+            'time': 100.,
+            'decay_time': 100.,
+            'background': 100.,
         }
 
         # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
         self.params_at_calibration = []
 
-    def exp_decay(self, time):
+    def exp_decay(self):
         amp = self.current_params['amp']
+        time = self.current_params['time']
         decay_time = self.current_params['decay_time']
         background = self.current_params['background']
         return amp * np.exp(-time / decay_time) + background
@@ -279,23 +438,23 @@ class ExpDecayFuncNode(Node):
             else:
                 direction = -1
             drift = direction * self.drift_rates[param] * np.random.uniform()
-            self.current_params[param] = max(self.parameter_min_values[param], self.current_params[param] + drift)
+            # Ensure that the new parameter is between the max and min values
+            new_param = self.current_params[param] + drift
+            new_param = max(self.parameter_min_values[param], new_param)
+            self.current_params[param] = min(self.parameter_max_values[param], new_param)
 
     def _check_value(self):
         """
         Check data at the 99.9% decay point
         """
-        time_point = -self.current_params['decay_time'] * np.log(1 - .999)
-        value = self.exp_decay(time_point)
-
-        return value
+        return 1 - self.exp_decay()
 
     def run_check(self):
         """
         Perform the check at the 99.9% decay point and evaluate results.
         """
         value = self._check_value()
-        result = (1 - value) > self.threshold
+        result = value > self.threshold
 
         return result
 
