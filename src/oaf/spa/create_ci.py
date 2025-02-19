@@ -15,7 +15,7 @@ def ci_for_parameter(parameter, proportion, confidence):
     :param confidence: float: Confidence level for the interval.
     :return: tuple[float]: The lower and upper bounds of the CI.
     """
-    return spa(ThresholdProperty(), parameter, proportion, confidence)
+    return spa(parameter, ThresholdProperty(), proportion, confidence)
 
 
 def ci_time_to_failure(times_to_failure, proportion, confidence):
