@@ -102,7 +102,7 @@ class QuantumCalibrationSimulator:
             dependency_nodes = self._get_all_dependencies(node)
             # Add nodes in DFS order
             submitted_nodes += dependency_nodes
-            submitted_nodes += node
+            submitted_nodes.append(node)
             # Trick to remove possible duplicates
             submitted_nodes = list(dict.fromkeys(submitted_nodes))
 
@@ -189,7 +189,7 @@ class QuantumCalibrationSimulator:
         wave_data += [{
             'wave': self.current_time + check_offest * 0.001,
             'timed_trigger': False,
-            'root_nodes': list(check_node),
+            'root_nodes': [check_node],
             'submitted_nodes': successors,
         }]
         # Failure data from this node

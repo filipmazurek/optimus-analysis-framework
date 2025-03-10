@@ -6,7 +6,7 @@ from spa.util import min_num_samples
 from oaf.data_analysis import count_failures, count_base_failures, time_to_failure, time_to_failure_base
 
 
-def ci_for_parameter(parameter, proportion, confidence):
+def ci_for_parameter(parameter, proportion, confidence, iteration_limit=1000):
     """
     Calculate a confidence interval for a given parameter.
 
@@ -15,23 +15,35 @@ def ci_for_parameter(parameter, proportion, confidence):
     :param confidence: float: Confidence level for the interval.
     :return: tuple[float]: The lower and upper bounds of the CI.
     """
+    # if len(parameter) >= min_num_samples(proportion, confidence):
+    #     spa_result = spa(parameter, ThresholdProperty(), proportion, confidence)
+    #     if spa_result.confidence_interval is None:
+    #         ci = None
+    #     else:
+    #         ci = (spa_result.confidence_interval.low, spa_result.confidence_interval.high)
+    # else:
+    #     ci = None
+    # return ci
     return spa(parameter, ThresholdProperty(), proportion, confidence)
 
 
-def ci_time_to_failure(times_to_failure, proportion, confidence):
+def ci_dict(data, proportion, confidence, iteration_limit=1000):
     """
-    Create SPA confidence intervals for the time to failure for each node.
+    Create SPA confidence intervals for each value in the dict
     """
-    nodes = times_to_failure.keys()
+    keys = data.keys()
 
-    # Calculate the CI for each node that has enough samples
+    # Calculate the CI for each key that has enough samples
     ci = {}
-    for node in nodes:
-        if len(times_to_failure[node]) >= min_num_samples(proportion, confidence):
-            spa_result = spa(times_to_failure[node], ThresholdProperty(), proportion, confidence)
-            ci[node] = (spa_result.confidence_interval.low, spa_result.confidence_interval.high)
+    for key in keys:
+        if len(data[key]) >= min_num_samples(proportion, confidence):
+            spa_result = spa(data[key], ThresholdProperty(), proportion, confidence, iteration_limit=iteration_limit)
+            if spa_result.confidence_interval is not None:
+                ci[key] = (spa_result.confidence_interval.low, spa_result.confidence_interval.high)
+            else:
+                ci[key] = None
         else:
-            ci[node] = None
+            ci[key] = None
 
     return ci
 
