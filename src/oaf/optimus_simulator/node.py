@@ -1,5 +1,7 @@
+import ms_gate
 import random
 import numpy as np
+import qutip as qt
 from abc import ABC
 
 
@@ -24,6 +26,12 @@ class Node(ABC):
         # Flags for timeout-aware adaptive Optimus
         self.first_check_delayed_flag = False
         self.long_lived_flag = False
+
+        # For connecting to dependent nodes
+        if 'dependent_nodes' in kwargs:
+            self.dependent_nodes = kwargs['dependent_nodes']
+        else:
+            self.dependent_nodes = {}
 
         if 'delay_first_check' in kwargs:
             assert isinstance(kwargs['delay_first_check'], bool)
@@ -231,6 +239,8 @@ class FuncNode(Node, ABC):
 
     def drift_parameters(self):
         for param in self.parameters:
+            if param == 'time' and  'rabi' in self.name:
+                pass
             # Decide drift direction
             if np.random.uniform() < self.drift_biases[param]:
                 direction = 1
@@ -250,14 +260,12 @@ class FuncNode(Node, ABC):
 
     def run_check(self):
         """
-        Perform the check at the 99.9% decay point and evaluate results.
+        Perform the check evaluate results.
         """
         value = self._check_value()
         return value > self.threshold
 
     def calibrate(self, time):
-        super().calibrate(time)
-
         # Save the parameters right before calibration
         current_params = self.current_params.copy()
         current_params['wave'] = time
@@ -266,14 +274,19 @@ class FuncNode(Node, ABC):
         # Reset to initial parameters
         self.current_params = self.initial_params.copy()
 
+        # Calibrate the time
+        super().calibrate(time)
+
     def _check_failure_magnitude(self):
         """
         Check failure magnitude based on how close the value is to the threshold.
         """
+        # TODO: This assumes that the value falls below the threshold.
+        #   Create an option to have a topline bound as well.
         value = self._check_value()
-        if abs(self.threshold - value) < 0.:
+        if self.threshold - value < 0.:
             return 0
-        if abs(self.threshold - value) < 0.01:
+        if self.threshold - value < 0.01:
             return 1
         else:
             return 2
@@ -289,6 +302,7 @@ class FuncNode(Node, ABC):
         self.failed = not result
         self.failure_magnitude = self._check_failure_magnitude()
 
+
     def get_all_data(self):
         super().get_all_data()
 
@@ -300,19 +314,23 @@ class Sin2FuncNode(FuncNode):
     def parameter_setup(self, **kwargs):
         # Default values
         defaults = {
-            'omega': 1.0,
-            'time': 1.0,  # arbitrary time unit
+            'omega': 2 * np.pi * 70e3,
+            'time': 1.0 / 280e3,  # approximately 3.5us gate time
             'delta': 0.0,  # delta for cos2 error term
             'background': 0.0,  # experimental error. Should be < 0
+
             'threshold': 0.992,  # Acceptable population threshold
+
             # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
-            'omega_drift_rate': 0.01,
+            'omega_drift_rate': 25077.5 / 75,  # value of 25077.5 leads being off the threshold
             # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
-            'omega_drift_bias': 0.5,
-            'time_drift_rate': 0.1,
-            'time_drift_bias': 0.5,
-            'background_drift_rate': 0.001,
-            'background_drift_bias': 0.5
+            'omega_drift_bias': 0.6,
+            'time_drift_rate': 2.03633e-7 / 75,  # 2.03633e-7 leads to being off threshold
+            'time_drift_bias': 0.6,
+            'delta_drift_rate': 0.0895624 / 75,  # 0.0895624 approximate delta to be off threshold
+            'delta_drift_bias': 0.6,
+            'background_drift_rate': 0.008 / 75,  # 0.008 leads to being off threshold
+            'background_drift_bias': 0.6,
         }
 
         # Override defaults with kwargs if provided
@@ -346,25 +364,25 @@ class Sin2FuncNode(FuncNode):
             'background': self.background_drift_bias,
         }
         self.parameter_min_values = {
-            'omega': 0.1,
-            'time': 0.1,
+            'omega': 0.0,
+            'time': 0.0,
             'delta': -100.,
-            'background': -100.,
+            'background': 0.,  # Background error is positive
         }
 
         self.parameter_max_values = {
-            'omega': 100.,
-            'time': 100.,
-            'delta': 100.,
-            'background': 0.,
+            'omega': np.inf,
+            'time': np.inf,
+            'delta': np.inf,
+            'background': np.inf,
         }
 
-    def sin2_with_error(self, time):
+    def sin2_with_error(self):
         omega = self.current_params['omega']
         time = self.current_params['time']
         delta = self.current_params['delta']
         background = self.current_params['background']
-        return np.sin(omega * np.pi * time) ** 2 * np.cos(delta) ** 2 + background
+        return np.sin(omega * time) ** 2 * np.cos(delta) ** 2 - background
 
     def _check_value(self):
         """
@@ -373,7 +391,7 @@ class Sin2FuncNode(FuncNode):
         return self.sin2_with_error()
 
 
-class ExpDecayFuncNode(Node):
+class ExpDecayFuncNode(FuncNode):
 
     def parameter_setup(self, **kwargs):
 
@@ -382,17 +400,19 @@ class ExpDecayFuncNode(Node):
             'amp': 1.0,
             'decay_time': 10.0,  # time in µs
             'background': 0.0,
+
             'threshold': 0.992,  # Acceptable population threshold. Desire 99.9%
+
             # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
-            'amp_drift_rate': 0.01,
+            'amp_drift_rate': 7 / 75,
             # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
-            'amp_drift_bias': 0.5,
-            'decay_time_drift_rate': 0.1,
-            'decay_time_drift_bias': 0.5,
-            'background_drift_rate': 0.001,
-            'background_drift_bias': 0.5,
-            'time_drift_rate': 0.,
-            'time_drift_bias': 0.5
+            'amp_drift_bias': 0.6,
+            'decay_time_drift_rate': 4.30677 / 75,
+            'decay_time_drift_bias': 0.6,
+            'background_drift_rate': 0.007 / 75,
+            'background_drift_bias': 0.6,
+            'time_drift_rate': 20.7944 / 75,
+            'time_drift_bias': 0.4
         }
 
         # Override defaults with kwargs if provided
@@ -429,17 +449,17 @@ class ExpDecayFuncNode(Node):
             'background': self.background_drift_bias,
         }
         self.parameter_min_values = {
-            'amp': 0.1,
-            'time': 0.0001,
-            'decay_time': 0.1,
-            'background': -100.,
+            'amp': self.initial_params['amp'],
+            'time': 0.,
+            'decay_time': self.initial_params['decay_time'],
+            'background': 0.,
         }
 
         self.parameter_max_values = {
-            'amp': 100.,
-            'time': 100.,
-            'decay_time': 100.,
-            'background': 100.,
+            'amp': np.inf,
+            'time': self.initial_params['time'],
+            'decay_time': np.inf,
+            'background': np.inf,
         }
 
         # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
@@ -450,10 +470,448 @@ class ExpDecayFuncNode(Node):
         time = self.current_params['time']
         decay_time = self.current_params['decay_time']
         background = self.current_params['background']
+        # Background must be positive in exp_decay. The higher this value, the worse it is
         return amp * np.exp(-time / decay_time) + background
 
     def _check_value(self):
         """
-        Check data at the 99.9% decay point
+        Check the fidelity. Inverse of the population remainder
         """
         return 1 - self.exp_decay()
+
+
+class DependentExpDecayNode(ExpDecayFuncNode):
+    """Func node that depends on another ExpDecayFuncNode. The value of the dependent node is used to determine the
+    background value of this node.
+    """
+
+    def __init__(self, **kwargs):
+        # Must have a dependent node to source the background value
+        assert 'dependent_nodes' in kwargs
+        assert 'background_node' in kwargs['dependent_nodes']
+        # dependent_nodes must be of the type ExpDecayFuncNode
+        assert isinstance(kwargs['dependent_nodes']['background_node'], ExpDecayFuncNode)
+        super().__init__(**kwargs)
+
+    def parameter_setup(self, **kwargs):
+        # Default values
+        defaults = {
+            'amp': 1.0,
+            'decay_time': 10.0,  # time in µs
+
+            'threshold': 0.992,  # Acceptable population threshold. Desire 99.9%
+
+            # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
+            'amp_drift_rate': 7 / 75,  # value of 7 leads to being off the threshold
+            # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
+            'amp_drift_bias': 0.6,
+            'decay_time_drift_rate': 4.30677 / 75,  # value of 4.30677 leads to being off the threshold
+            'decay_time_drift_bias': 0.6,
+            'time_drift_rate': 20.7944 / 75,  # value of 20.7944 leads to being off the threshold
+            'time_drift_bias': 0.4
+        }
+
+        # Override defaults with kwargs if provided
+        for key, default in defaults.items():
+            setattr(self, key, kwargs.get(key, default))
+
+        # Calculate the time parameter based on the decay time. Drifts in time here model drifts in the control
+        self.time = -self.decay_time * np.log(1 - .999)
+
+        self.parameters = [
+            'amp',
+            'time',
+            'decay_time',
+        ]
+        self.initial_params = {
+            'amp': self.amp,
+            'time': self.time,
+            'decay_time': self.decay_time,
+        }
+        self.current_params = self.initial_params.copy()
+        self.threshold = self.threshold
+        self.drift_rates = {
+            'amp': self.amp_drift_rate,
+            'time': self.time_drift_rate,
+            'decay_time': self.decay_time_drift_rate,
+        }
+        self.drift_biases = {
+            'amp': self.amp_drift_bias,
+            'time': self.time_drift_bias,
+            'decay_time': self.decay_time_drift_bias,
+        }
+        self.parameter_min_values = {
+            'amp': self.initial_params['amp'],
+            'time': 0.,
+            'decay_time': self.initial_params['decay_time'],
+        }
+
+        self.parameter_max_values = {
+            'amp': np.inf,
+            'time': self.initial_params['time'],
+            'decay_time': np.inf,
+        }
+
+    def get_background(self):
+        return self.dependent_nodes['background_node'].exp_decay()
+
+    def exp_decay(self):
+        amp = self.current_params['amp']
+        time = self.current_params['time']
+        decay_time = self.current_params['decay_time']
+        background = self.dependent_nodes['background_node'].exp_decay()
+        # Background must be positive in exp_decay. The higher this value, the worse it is
+
+        return amp * np.exp(-time / decay_time) + background / 5
+
+class SPAMBackgroundNode(ExpDecayFuncNode):
+    """Func node that simulates checking background dark fideliyt. This value is then used to simulate SPAM error by
+    adding its fidelity value as the background value to the sin2 function, worsening its otucome.
+    """
+
+    def parameter_setup(self, **kwargs):
+
+        # Default values
+        defaults = {
+            'amp': 1.0,
+            'decay_time': 10.0,  # time in µs
+            'background': 0.0,
+
+            'threshold': 0.992,  # Acceptable population threshold. Desire 99.9%
+
+            # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
+            'amp_drift_rate': 7 / 4900,
+            # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
+            'amp_drift_bias': 0.6,
+            'decay_time_drift_rate': 4.30677 / 4900,
+            'decay_time_drift_bias': 0.6,
+            'background_drift_rate': 0.007 / 4900,
+            'background_drift_bias': 0.6,
+            'time_drift_rate': 20.7944 / 4900,
+            'time_drift_bias': 0.4
+        }
+
+        # Override defaults with kwargs if provided
+        for key, default in defaults.items():
+            setattr(self, key, kwargs.get(key, default))
+
+        # Calculate the time parameter based on the decay time. Drifts in time here model drifts in the control
+        self.time = -self.decay_time * np.log(1 - .999)
+
+        self.parameters = [
+            'amp',
+            'time',
+            'decay_time',
+            'background',
+        ]
+        self.initial_params = {
+            'amp': self.amp,
+            'time': self.time,
+            'decay_time': self.decay_time,
+            'background': self.background,
+        }
+        self.current_params = self.initial_params.copy()
+        self.threshold = self.threshold
+        self.drift_rates = {
+            'amp': self.amp_drift_rate,
+            'time': self.time_drift_rate,
+            'decay_time': self.decay_time_drift_rate,
+            'background': self.background_drift_rate,
+        }
+        self.drift_biases = {
+            'amp': self.amp_drift_bias,
+            'time': self.time_drift_bias,
+            'decay_time': self.decay_time_drift_bias,
+            'background': self.background_drift_bias,
+        }
+        self.parameter_min_values = {
+            'amp': self.initial_params['amp'],
+            'time': 0.,
+            'decay_time': self.initial_params['decay_time'],
+            'background': 0.,
+        }
+
+        self.parameter_max_values = {
+            'amp': np.inf,
+            'time': self.initial_params['time'],
+            'decay_time': np.inf,
+            'background': np.inf,
+        }
+
+        # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
+        self.params_at_calibration = []
+
+
+    def get_background(self):
+        return self.exp_decay()
+
+
+class RabiNode(Sin2FuncNode):
+    """This node depends on a SPAMBackgroundNode, used to determine the background value """
+    # np.sin(omega * np.pi * time) ** 2 * np.cos(delta) ** 2 - background
+    # Time is about 3.5 us to hit the first peak
+
+    def __init__(self, **kwargs):
+        # Must have a dependent node to source the Rabi frequency
+        assert 'dependent_nodes' in kwargs
+        assert 'spam_background_node' in kwargs['dependent_nodes']
+        # dependent_nodes must be of the type SPAMBackgroundNode
+        assert isinstance(kwargs['dependent_nodes']['spam_background_node'], SPAMBackgroundNode)
+
+        super().__init__(**kwargs)
+
+    def parameter_setup(self, **kwargs):
+        # Default values
+        defaults = {
+            'omega': 2*np.pi * 70e3,
+            'time': 1.0/280e3,  # approximately 3.5us gate time
+            'delta': 0.0,  # delta for cos2 error term
+            'threshold': 0.992,  # Acceptable population threshold
+            # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
+            'omega_drift_rate': 25077.5 / 75,  # value of 25077.5 leads being off the threshold
+            # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
+            'omega_drift_bias': 0.6,
+            'time_drift_rate': 2.03633e-7 / 75,  # 2.03633e-7 leads to being off threshold
+            'time_drift_bias': 0.6,
+            'delta_drift_rate': 0.0895624 / 75,  # 0.0895624 approximate delta to be off threshold
+            'delta_drift_bias': 0.6,
+        }
+
+        # Override defaults with kwargs if provided
+        for key, default in defaults.items():
+            setattr(self, key, kwargs.get(key, default))
+
+        self.parameters = [
+            'omega',
+            'time',
+            'delta',
+        ]
+        self.initial_params = {
+            'omega': self.omega,
+            'time': self.time,
+            'delta': self.delta,
+        }
+        self.current_params = self.initial_params.copy()
+        self.threshold = self.threshold
+        self.drift_rates = {
+            'omega': self.omega_drift_rate,
+            'time': self.time_drift_rate,
+            'delta': self.delta_drift_rate,
+        }
+        self.drift_biases = {
+            'omega': self.omega_drift_bias,
+            'time': self.time_drift_bias,
+            'delta': self.delta_drift_bias,
+        }
+        self.parameter_min_values = {
+            'omega': 0.,
+            'time': 0.,
+            'delta': -np.inf,
+        }
+
+        self.parameter_max_values = {
+            'omega': np.inf,
+            'time': 100.,
+            'delta': np.inf,
+        }
+
+    def get_rabi_freq(self):
+        omega = self.current_params['omega']
+        return omega
+
+    def get_tau(self):
+        time = self.current_params['time']
+        return time
+
+    def sin2_with_error(self):
+        omega = self.current_params['omega']
+        time = self.current_params['time']
+        delta = self.current_params['delta']
+        background = self.dependent_nodes['spam_background_node'].get_background()  # Value must be positive, so will be subracted
+
+        return np.sin(omega * time) ** 2 * np.cos(delta) ** 2 - background / 5
+
+
+class XGateFreqOnlyNode(FuncNode):
+
+    def __init__(self, **kwargs):
+        # Must have a dependent node to source the Rabi frequency
+        assert 'dependent_nodes' in kwargs
+        assert 'rabi_freq_node' in kwargs['dependent_nodes']
+        # dependent_nodes must be of the type rabi_frequency_node
+        assert type(kwargs['dependent_nodes']['rabi_freq_node']) is RabiFrequencyNode
+
+        super().__init__(**kwargs)
+
+    def parameter_setup(self, **kwargs):
+
+        # Default values
+        defaults = {
+            'tau': np.pi / (2*np.pi * 70e3),
+            'spin_phase': 0.,  # laser phase
+            'threshold': 0.98,  # Acceptable X gate fidelity
+            # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
+            'tau_drift_rate': .05 / (2*np.pi * 70e3),
+            # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
+            'tau_drift_bias': 0.5,
+            'spin_phase_drift_rate': 0.05,
+            'spin_phase_drift_bias': 0.5,
+        }
+
+        # Override defaults with kwargs if provided
+        for key, default in defaults.items():
+            setattr(self, key, kwargs.get(key, default))
+
+        self.parameters = [
+            'tau',
+            'spin_phase',
+        ]
+        self.initial_params = {
+            'tau': self.tau,
+            'spin_phase': self.spin_phase,
+        }
+        self.current_params = self.initial_params.copy()
+        self.threshold = self.threshold
+        self.drift_rates = {
+            'tau': self.tau_drift_rate,
+            'spin_phase': self.spin_phase_drift_rate,
+        }
+        self.drift_biases = {
+            'tau': self.tau_drift_bias,
+            'spin_phase': self.spin_phase_drift_bias,
+        }
+        self.parameter_min_values = {
+            'tau': 0.,
+            'spin_phase': -np.pi / 2,
+        }
+
+        self.parameter_max_values = {
+            'tau': 1.,
+            'spin_phase': np.pi / 2,
+        }
+
+        # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
+        self.params_at_calibration = []
+
+    def simulate_X_gate_fidelity(self):
+        # Get the Rabi frequency from the dependent node
+        rabi_freq = self.dependent_nodes['rabi_freq_node'].get_rabi_freq()
+
+        tau = self.current_params['tau']
+        spin_phase = self.current_params['spin_phase']
+        # The following are technically unused, but must be of the correct shape
+        mode_freq = np.array([13849904.48413065, 14128632.55338318, 14355776.36241415,
+       14540002.43438146, 14685826.11757425])
+        eta = np.array([0.1, 0.1, 0.1, 0.1, 0.1])
+        normal_coeff = np.array(
+            [[-1.04541242e-01], [3.01659288e-01], [-5.37653354e-01], [-6.39532387e-01], [4.47213595e-01]])
+
+        # Initial state is |-> to catch phase errors
+        init_qubit_state = (qt.fock(2, 1) - qt.fock(2, 0)) / np.sqrt(2)
+        sim = ms_gate.Simulator(mode_freq, eta, normal_coeff, tau, 1, rabi_freq, spin_phase_list=spin_phase)
+        sim.solve([0], [], sideband=False, carrier=True, init_qubit_state=init_qubit_state)
+
+        # Calculate fidelity of the X gate. X|-> = |->
+        final_state = sim.final_qubit_state
+
+        minus_state = (qt.fock(2, 0) - qt.fock(2, 1)).unit()
+        # Compute the density matrix of the ideal |-> state
+        rho_ideal = minus_state * minus_state.dag()
+        # Compute fidelity: F = Tr( sqrt( sqrt(rho_ideal) * rho_actual * sqrt(rho_ideal) ) )^2
+        fidelity = qt.fidelity(final_state, rho_ideal)
+
+        return fidelity
+
+    def _check_value(self):
+        """
+        Get the fidelity of the X gate
+        """
+        return self.simulate_X_gate_fidelity()
+
+
+class XGateNode(FuncNode):
+
+    def __init__(self, **kwargs):
+        # Must have a dependent node to source the Rabi frequency
+        assert 'dependent_nodes' in kwargs
+        assert 'rabi_freq_node' in kwargs['dependent_nodes']
+        assert 'tau_node' in kwargs['dependent_nodes']
+        # dependent_nodes must be of the type rabi_frequency_node
+        assert type(kwargs['dependent_nodes']['rabi_freq_node']) is RabiNode
+        assert type(kwargs['dependent_nodes']['tau_node']) is RabiNode
+
+        super().__init__(**kwargs)
+
+    def parameter_setup(self, **kwargs):
+
+        # Default values
+        defaults = {
+            'spin_phase': 0.,  # laser phase
+            'threshold': 0.98,  # Acceptable X gate fidelity
+            # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
+            # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
+            'spin_phase_drift_rate': 0.0632 / 75,
+            'spin_phase_drift_bias': 0.5,
+        }
+
+        # Override defaults with kwargs if provided
+        for key, default in defaults.items():
+            setattr(self, key, kwargs.get(key, default))
+
+        self.parameters = [
+            'spin_phase',
+        ]
+        self.initial_params = {
+            'spin_phase': self.spin_phase,
+        }
+        self.current_params = self.initial_params.copy()
+        self.threshold = self.threshold
+        self.drift_rates = {
+            'spin_phase': self.spin_phase_drift_rate,
+        }
+        self.drift_biases = {
+            'spin_phase': self.spin_phase_drift_bias,
+        }
+        self.parameter_min_values = {
+            'spin_phase': -np.pi / 2,
+        }
+
+        self.parameter_max_values = {
+            'spin_phase': np.pi / 2,
+        }
+
+        # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
+        self.params_at_calibration = []
+
+    def simulate_X_gate_fidelity(self):
+        # Get the Rabi frequency from the dependent node
+        rabi_freq = self.dependent_nodes['rabi_freq_node'].get_rabi_freq()
+        tau = self.dependent_nodes['tau_node'].get_tau()
+
+        spin_phase = self.current_params['spin_phase']
+        # The following are technically unused, but must be of the correct shape
+        mode_freq = np.array([13849904.48413065])
+        eta = np.array([0.1])
+        normal_coeff = np.array([[-1.04541242e-01]])
+
+        # Initial state is |-> to catch phase errors
+        init_qubit_state = (qt.fock(2, 1) - qt.fock(2, 0)) / np.sqrt(2)
+        sim = ms_gate.Simulator(mode_freq, eta, normal_coeff, tau, 1, rabi_freq, spin_phase_list=spin_phase)
+        sim.solve([0], [], sideband=False, carrier=True, init_qubit_state=init_qubit_state)
+
+        # Calculate fidelity of the X gate. X|-> = |->
+        final_state = sim.final_qubit_state
+
+        minus_state = (qt.fock(2, 0) - qt.fock(2, 1)).unit()
+        # Compute the density matrix of the ideal |-> state
+        rho_ideal = minus_state * minus_state.dag()
+        # Compute fidelity: F = Tr( sqrt( sqrt(rho_ideal) * rho_actual * sqrt(rho_ideal) ) )^2
+        fidelity = qt.fidelity(final_state, rho_ideal)
+
+        return fidelity
+
+    def _check_value(self):
+        """
+        Get the fidelity of the X gate
+        """
+        return self.simulate_X_gate_fidelity()
