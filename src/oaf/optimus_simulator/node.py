@@ -850,8 +850,8 @@ class XGateNode(FuncNode):
             'threshold': 0.98,  # Acceptable X gate fidelity
             # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
             # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
-            'spin_phase_drift_rate': 0.0632 / 75,
-            'spin_phase_drift_bias': 0.5,
+            'spin_phase_drift_rate': 0.0632 / 50,
+            'spin_phase_drift_bias': 0.4,
         }
 
         # Override defaults with kwargs if provided
