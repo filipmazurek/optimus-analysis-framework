@@ -3,6 +3,7 @@ import random
 import numpy as np
 import qutip as qt
 from abc import ABC
+from scipy.stats import gamma
 
 
 class Node(ABC):
@@ -279,11 +280,17 @@ class FuncNode(Node, ABC):
         if self.randomize_calibration:
             new_params = {}
             for param in self.parameters:
-                new_params[param] = np.random.uniform(self.initial_params[param] - self.drift_rates[param] * 2,
-                                                      self.initial_params[param] + self.drift_rates[param] * 2)
-                # Respect the min and max param values
-                new_params[param] = max(self.parameter_min_values[param], new_params[param])
-                new_params[param] = min(self.parameter_max_values[param], new_params[param])
+                optimal_value = self.initial_params[param]
+                drift_scale = self.drift_rates[param] * 2  # Defines range
+                drift_direction = self.drift_biases[param] >= 0.5  # Expected to be +1 or -1
+
+                # Shape parameter: higher values reduce skew, lower increases asymmetry
+                shape = 2.0  # Adjust as needed for desired tail behavior
+
+                if drift_direction:  # Right-tailed gamma (positive drift bias)
+                    new_params[param] = gamma.rvs(a=shape, scale=drift_scale / shape) + optimal_value
+                else:  # Left-tailed gamma (negative drift bias)
+                    new_params[param] = optimal_value - gamma.rvs(a=shape, scale=drift_scale / shape)
             self.current_params = new_params
         else:
             self.current_params = self.initial_params.copy()
