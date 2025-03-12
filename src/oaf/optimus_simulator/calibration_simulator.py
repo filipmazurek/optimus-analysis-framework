@@ -35,6 +35,7 @@ class QuantumCalibrationSimulator:
         self.wave_offset = 0  # Global offset to avoid workarounds for diagnosis wave separation
         self.current_time = 0.
         self.ground_truth = []
+        self.node_parameter_data = []
 
     def simulate(self, total_time_steps):
         """Run the simulation for a number of time steps."""
@@ -185,6 +186,15 @@ class QuantumCalibrationSimulator:
         # Recalibrate this node
         node.calibrate(self.current_time)
 
+        # Every time a node is calibrated, add its parameters to node_parameter_data
+        pre_cal_params, post_cal_params = node.get_parameter_calibration_data()
+        self.node_parameter_data.append({
+            'node': check_node,
+            'wave': self.current_time,
+            'pre_cal_params': pre_cal_params,
+            'post_cal_params': post_cal_params,
+        })
+
         # Wave data from this node
         wave_data += [{
             'wave': self.current_time + check_offest * 0.001,
@@ -221,3 +231,7 @@ class QuantumCalibrationSimulator:
     def get_ground_truth(self):
         """Get the ground truth data."""
         return self.ground_truth
+
+    def get_node_parameter_data(self):
+        """Get the node parameter data."""
+        return self.node_parameter_data

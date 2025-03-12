@@ -111,6 +111,7 @@ class Node(ABC):
                 self.modify_timeout(self.fifth_percentile_ttf / 3)
                 self.first_check_delayed_flag = True
 
+
 class SimpleNode(Node):
     """
     Simple node that fails with a given probability at every time step.
@@ -138,6 +139,7 @@ class DistributionThresholdNode(Node):
     Node that at every step of the simulation will generate `num_samples` data points from a distribution
     and check if the samples satisfy some property
     """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         assert 'dist_type' in kwargs, "'dist_type' is required for DistributionMeanThresholdNode."
@@ -189,6 +191,7 @@ class TrendNode(Node):
     Node that simulates a trend with drift and noise. Fails when the trend crosses a threshold.
     Similar in idea to drifting parameters in a device.
     """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         assert 'initial_value' in kwargs, "'initial_value' is required for TrendNode."
@@ -220,10 +223,13 @@ class TrendNode(Node):
 
 class FuncNode(Node, ABC):
     def __init__(self, **kwargs):
+        # If randomize calibration is in kwargs, set the calibration randomization flag
+        self.randomize_calibration = kwargs.get('randomize_calibration', False)
         super().__init__(**kwargs)
         self.parameter_setup(**kwargs)
-        # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
-        self.params_at_calibration = []
+        # Used to store parameter values before and after calibration
+        self.params_before_calibration = {}
+        self.params_after_calibration = {}
 
     def parameter_setup(self, **kwargs):
         # Must set up the following:
@@ -239,7 +245,7 @@ class FuncNode(Node, ABC):
 
     def drift_parameters(self):
         for param in self.parameters:
-            if param == 'time' and  'rabi' in self.name:
+            if param == 'time' and 'rabi' in self.name:
                 pass
             # Decide drift direction
             if np.random.uniform() < self.drift_biases[param]:
@@ -267,12 +273,22 @@ class FuncNode(Node, ABC):
 
     def calibrate(self, time):
         # Save the parameters right before calibration
-        current_params = self.current_params.copy()
-        current_params['wave'] = time
-        self.params_at_calibration.append(current_params)
+        self.params_before_calibration = self.current_params.copy()
 
         # Reset to initial parameters
-        self.current_params = self.initial_params.copy()
+        if self.randomize_calibration:
+            new_params = {}
+            for param in self.parameters:
+                new_params[param] = np.random.uniform(self.initial_params[param] - self.drift_rates[param] * 2,
+                                                      self.initial_params[param] + self.drift_rates[param] * 2)
+                # Respect the min and max param values
+                new_params[param] = max(self.parameter_min_values[param], new_params[param])
+                new_params[param] = min(self.parameter_max_values[param], new_params[param])
+            self.current_params = new_params
+        else:
+            self.current_params = self.initial_params.copy()
+
+        self.params_after_calibration = self.current_params.copy()
 
         # Calibrate the time
         super().calibrate(time)
@@ -302,11 +318,8 @@ class FuncNode(Node, ABC):
         self.failed = not result
         self.failure_magnitude = self._check_failure_magnitude()
 
-
-    def get_all_data(self):
-        super().get_all_data()
-
-        return self.params_at_calibration
+    def get_parameter_calibration_data(self):
+        return self.params_before_calibration, self.params_after_calibration
 
 
 class Sin2FuncNode(FuncNode):
@@ -394,7 +407,6 @@ class Sin2FuncNode(FuncNode):
 class ExpDecayFuncNode(FuncNode):
 
     def parameter_setup(self, **kwargs):
-
         # Default values
         defaults = {
             'amp': 1.0,
@@ -462,8 +474,9 @@ class ExpDecayFuncNode(FuncNode):
             'background': np.inf,
         }
 
-        # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
-        self.params_at_calibration = []
+        # Used to store parameter values before and after calibration
+        self.params_before_calibration = {}
+        self.params_after_calibration = {}
 
     def exp_decay(self):
         amp = self.current_params['amp']
@@ -564,13 +577,13 @@ class DependentExpDecayNode(ExpDecayFuncNode):
 
         return amp * np.exp(-time / decay_time) + background / 5
 
+
 class SPAMBackgroundNode(ExpDecayFuncNode):
     """Func node that simulates checking background dark fideliyt. This value is then used to simulate SPAM error by
     adding its fidelity value as the background value to the sin2 function, worsening its otucome.
     """
 
     def parameter_setup(self, **kwargs):
-
         # Default values
         defaults = {
             'amp': 1.0,
@@ -638,9 +651,9 @@ class SPAMBackgroundNode(ExpDecayFuncNode):
             'background': np.inf,
         }
 
-        # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
-        self.params_at_calibration = []
-
+        # Used to store parameter values before and after calibration
+        self.params_before_calibration = {}
+        self.params_after_calibration = {}
 
     def get_background(self):
         return self.exp_decay()
@@ -648,6 +661,7 @@ class SPAMBackgroundNode(ExpDecayFuncNode):
 
 class RabiNode(Sin2FuncNode):
     """This node depends on a SPAMBackgroundNode, used to determine the background value """
+
     # np.sin(omega * np.pi * time) ** 2 * np.cos(delta) ** 2 - background
     # Time is about 3.5 us to hit the first peak
 
@@ -663,8 +677,8 @@ class RabiNode(Sin2FuncNode):
     def parameter_setup(self, **kwargs):
         # Default values
         defaults = {
-            'omega': 2*np.pi * 70e3,
-            'time': 1.0/280e3,  # approximately 3.5us gate time
+            'omega': 2 * np.pi * 70e3,
+            'time': 1.0 / 280e3,  # approximately 3.5us gate time
             'delta': 0.0,  # delta for cos2 error term
             'threshold': 0.992,  # Acceptable population threshold
             # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
@@ -727,7 +741,8 @@ class RabiNode(Sin2FuncNode):
         omega = self.current_params['omega']
         time = self.current_params['time']
         delta = self.current_params['delta']
-        background = self.dependent_nodes['spam_background_node'].get_background()  # Value must be positive, so will be subracted
+        background = self.dependent_nodes[
+            'spam_background_node'].get_background()  # Value must be positive, so will be subracted
 
         return np.sin(omega * time) ** 2 * np.cos(delta) ** 2 - background / 5
 
@@ -744,14 +759,13 @@ class XGateFreqOnlyNode(FuncNode):
         super().__init__(**kwargs)
 
     def parameter_setup(self, **kwargs):
-
         # Default values
         defaults = {
-            'tau': np.pi / (2*np.pi * 70e3),
+            'tau': np.pi / (2 * np.pi * 70e3),
             'spin_phase': 0.,  # laser phase
             'threshold': 0.98,  # Acceptable X gate fidelity
             # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
-            'tau_drift_rate': .05 / (2*np.pi * 70e3),
+            'tau_drift_rate': .05 / (2 * np.pi * 70e3),
             # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
             'tau_drift_bias': 0.5,
             'spin_phase_drift_rate': 0.05,
@@ -790,8 +804,9 @@ class XGateFreqOnlyNode(FuncNode):
             'spin_phase': np.pi / 2,
         }
 
-        # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
-        self.params_at_calibration = []
+        # Used to store parameter values before and after calibration
+        self.params_before_calibration = {}
+        self.params_after_calibration = {}
 
     def simulate_X_gate_fidelity(self):
         # Get the Rabi frequency from the dependent node
@@ -801,7 +816,7 @@ class XGateFreqOnlyNode(FuncNode):
         spin_phase = self.current_params['spin_phase']
         # The following are technically unused, but must be of the correct shape
         mode_freq = np.array([13849904.48413065, 14128632.55338318, 14355776.36241415,
-       14540002.43438146, 14685826.11757425])
+                              14540002.43438146, 14685826.11757425])
         eta = np.array([0.1, 0.1, 0.1, 0.1, 0.1])
         normal_coeff = np.array(
             [[-1.04541242e-01], [3.01659288e-01], [-5.37653354e-01], [-6.39532387e-01], [4.47213595e-01]])
@@ -843,7 +858,6 @@ class XGateNode(FuncNode):
         super().__init__(**kwargs)
 
     def parameter_setup(self, **kwargs):
-
         # Default values
         defaults = {
             'spin_phase': 0.,  # laser phase
@@ -880,8 +894,9 @@ class XGateNode(FuncNode):
             'spin_phase': np.pi / 2,
         }
 
-        # Used to store the parameters right before calibration, therefore saving the out-of-spec parameters
-        self.params_at_calibration = []
+        # Used to store parameter values before and after calibration
+        self.params_before_calibration = {}
+        self.params_after_calibration = {}
 
     def simulate_X_gate_fidelity(self):
         # Get the Rabi frequency from the dependent node

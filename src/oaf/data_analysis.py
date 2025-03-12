@@ -1,15 +1,20 @@
 import networkx as nx
 from collections import defaultdict
 from itertools import combinations
+from math import floor
 
 from oaf.util import validate_check_data, validate_wave_data, split_data_by_wave
 
 
-def time_to_failure(wave_data: list[dict], nodes: list[str]):
+def time_to_failure(wave_data: list[dict], nodes: list[str], start_time: float=None, floor_time_units=False):
     """
     Find the time to failure for each node in the wave data.
 
     :param wave_data: Per-wave data
+    :param nodes: Nodes for which to find time to failure.
+    :param start_time: Assumed 'all calibrated' time. If None, first timed_trigger wave is assumed to be the start.
+    :param floor_time_units: If True, round time to failure to the nearest integer. Used for simulation data.
+
     :return: The time to failure for each node.
     """
     validate_wave_data(wave_data)
@@ -24,15 +29,19 @@ def time_to_failure(wave_data: list[dict], nodes: list[str]):
 
     # Set up time_of_last_failure for each node. Default value is the beginning of the time period where everything is
     #   assumed to be newly calibrated.
-    time_of_last_failure = {node: wave_data[0]['wave'] for node in nodes}
+    if start_time is not None:
+        time_of_last_failure = {node: start_time for node in nodes}
+    else:
+        time_of_last_failure = {node: floor(wave_data[0]['wave']) for node in nodes}
 
     # Iterate through the wave data, checking when each node failed
     for entry in wave_data:
         if entry['timed_trigger']:
             continue
         for node in entry['root_nodes']:
-            time_to_failure[node].append(entry['wave'] - time_of_last_failure[node])
-            time_of_last_failure[node] = entry['wave']
+            failure_time = floor(entry['wave'])
+            time_to_failure[node].append(failure_time - time_of_last_failure[node])
+            time_of_last_failure[node] = failure_time
 
     return time_to_failure
 
