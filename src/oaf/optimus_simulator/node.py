@@ -23,6 +23,8 @@ class Node(ABC):
         self.last_check = 0.
         self.failure_magnitude = 0  # 0: No failure, 1: Minor failure, 2: Major failure
         self.check_data_value = None
+        self.num_first_checks_to_delay = 2
+        self.cur_num_first_checks_delayed = 0
 
         # Flags for timeout-aware adaptive Optimus
         self.first_check_delayed_flag = False
@@ -57,9 +59,6 @@ class Node(ABC):
         if 'fifth_percentile_ttf' in kwargs and 'ninety_fifth_percentile_ttf' in kwargs:
             assert self.ninety_fifth_percentile_ttf > self.fifth_percentile_ttf > 0.
 
-    def modify_timeout(self, new_timeout):
-        self.timeout = new_timeout
-
     def reset_to_initial_timeout(self):
         self.timeout = self.base_timeout
 
@@ -91,7 +90,7 @@ class Node(ABC):
             time_alive = max(self.last_calibration, self.last_check) - time
             if time_alive > self.ninety_fifth_percentile_ttf:
                 # TODO: set values that make sense
-                self.modify_timeout(self.tiemout / 2)
+                self.timeout = self.base_timeout / 2
                 self.long_lived_flag = True
 
         return failed
@@ -102,15 +101,20 @@ class Node(ABC):
         self.last_calibration = time
         self.failure_magnitude = 0
 
+        # Reset the number of delayed checks, if applicable
+        self.cur_num_first_checks_delayed = 0
+
         self.long_lived_flag = False
 
         # Perform adaptive Optimus timeout adjustment
-        if self.delay_first_check:
+        if self.delay_first_check and self.cur_num_first_checks_delayed < self.num_first_checks_to_delay:
             # If the 5th percentile ttf is much greater than the current timeout, increase the timeout
             # TODO: set values that make sense
-            if self.fifth_percentile_ttf > 3 * self.timeout:
-                self.modify_timeout(self.fifth_percentile_ttf / 3)
-                self.first_check_delayed_flag = True
+            if self.fifth_percentile_ttf > 5 * self.timeout:
+                self.cur_num_first_checks_delayed += 1
+                self.timeout = self.fifth_percentile_ttf / 5
+                if self.cur_num_first_checks_delayed == self.num_first_checks_to_delay:
+                    self.first_check_delayed_flag = True
 
 
 class SimpleNode(Node):
