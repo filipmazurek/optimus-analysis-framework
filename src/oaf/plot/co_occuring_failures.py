@@ -25,7 +25,7 @@ def plot(cooccurring_data, all_nodes, filename=None):
 
     # Populate the heatmap with co-occurrence counts
     for (node1, node2), count in cooccurring_data.items():
-        # heatmap.loc[node1, node2] = count
+        heatmap.loc[node1, node2] = count
         heatmap.loc[node2, node1] = count
 
     # Get the Upper Triangle of the co-relation matrix

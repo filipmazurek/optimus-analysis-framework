@@ -67,7 +67,7 @@ class QuantumCalibrationSimulator:
                 self.check_data_results += check_data_results
 
             # Step 4: Advance the simulation
-            self._simulate_failures()
+            self._simulate_failures(self.current_time)
             self.current_time += self.time_step
 
     def _get_all_dependencies(self, node_name):
@@ -213,12 +213,12 @@ class QuantumCalibrationSimulator:
         
         return wave_data, check_data_results
 
-    def _simulate_failures(self):
+    def _simulate_failures(self, current_time):
         """Simulate failures for each node based on their failure probability."""
         # Simulate failure for each time step
         for step in range(self.time_step):
             for _, node in self.nodes.items():
-                node.simulate_failure()
+                node.simulate_failure(current_time + step)
 
     def get_wave_data(self):
         """Get the wave data."""

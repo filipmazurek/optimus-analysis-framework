@@ -166,6 +166,67 @@ def find_co_occurring_failures(wave_data, nodes):
     return cooccurrence_matrix
 
 
+def find_co_occurring_failures_sliding(wave_data, nodes, sliding_window_size):
+    """
+    Find co-occurring failures within a sliding window of waves.
+
+    :param wave_data: list of list of dict: List of waves, where each wave is a list of wave data dictionaries.
+    :param nodes: list of str: List of node names to consider.
+    :param sliding_window_size: int: The number of waves to include in each sliding window.
+    :return: dict of node tuples and their co-occurrence count.
+    """
+    validate_wave_data(wave_data)
+
+    split_wave_data = split_data_by_wave(wave_data)
+
+    cooccurrence_matrix = {}
+    # Add all node combinations to the matrix
+    for node1, node2 in combinations(nodes, 2):
+        # Keep the pair sorted to ensure consistent key ordering
+        pair = tuple(sorted((node1, node2)))
+        cooccurrence_matrix[pair] = 0
+
+    # Find what the last window is. Found by finding the last wave value and then finding the last wave that fits into
+    # the window
+    last_wave = split_wave_data[-1][0]['wave']
+    last_wave_index_outside_window = -1
+
+    # Go backwards through the waves to find the last wave outside the window. This is the last wave that will be
+    # included in the analysis. The next one will be skipped
+    for i in range(len(split_wave_data) - 1, -1, -1):
+        if last_wave - split_wave_data[i][0]['wave'] >= sliding_window_size:
+            # This is the last wave value
+            last_wave_index_outside_window = i
+            break
+
+    # Look through every set of diagnosis waves
+    for i, wave in enumerate(split_wave_data):
+        if i > last_wave_index_outside_window:
+            break
+
+        failing_nodes = set()
+
+        # Include in analysis all the nodes which fit in the sliding window
+        cur_wave = wave[0]['wave']
+
+        for j in range(i, len(split_wave_data)):
+            sliding_wave = split_wave_data[j]
+            if sliding_wave[0]['wave'] - cur_wave > sliding_window_size:
+                # Add all co-occurrences for the current window
+                for node1, node2 in combinations(failing_nodes, 2):
+                    pair = tuple(sorted((node1, node2)))
+                    cooccurrence_matrix[pair] += 1
+                break
+
+            # All root_nodes that are not a timed_trigger are failed nodes
+            for entry in sliding_wave:
+                if entry['timed_trigger']:
+                    continue
+                failing_nodes.update(entry['root_nodes'])
+
+    return cooccurrence_matrix
+
+
 def find_base_failure_for_wave(wave_data, graph):
     """
     For a single trigger wave and possible diagnose waves, find the base cause of downstream failure.

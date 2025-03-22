@@ -62,7 +62,7 @@ class Node(ABC):
     def reset_to_initial_timeout(self):
         self.timeout = self.base_timeout
 
-    def simulate_failure(self):
+    def simulate_failure(self, time=None):
         """Simulate failure for the node. Typically done at every timestep of the sim."""
         pass
 
@@ -128,7 +128,7 @@ class SimpleNode(Node):
         assert 'failure_prob' in kwargs
         self.failure_prob = kwargs['failure_prob']
 
-    def simulate_failure(self):
+    def simulate_failure(self, time=None):
         if self.failed:
             return
 
@@ -176,7 +176,7 @@ class DistributionThresholdNode(Node):
         else:
             raise ValueError(f"Invalid distribution type: {dist_type}")
 
-    def simulate_failure(self):
+    def simulate_failure(self, time=None):
         if self.failed:
             return
 
@@ -209,7 +209,7 @@ class TrendNode(Node):
         self.noise_std = kwargs['noise_std']
         self.threshold = kwargs['threshold']
 
-    def simulate_failure(self):
+    def simulate_failure(self, time=None):
         if self.failed:
             return
 
@@ -230,6 +230,10 @@ class FuncNode(Node, ABC):
     def __init__(self, **kwargs):
         # If randomize calibration is in kwargs, set the calibration randomization flag
         self.randomize_calibration = kwargs.get('randomize_calibration', False)
+        self.nonlinear_drift = kwargs.get('nonlinear_drift', False)
+        self.nonlinear_drift_k = kwargs.get('nonlinear_drift_k', 0.02)
+        self.nonlinear_drift_n0 = kwargs.get('nonlinear_drift_n0', 200)
+
         super().__init__(**kwargs)
         self.parameter_setup(**kwargs)
         # Used to store parameter values before and after calibration
@@ -248,16 +252,24 @@ class FuncNode(Node, ABC):
         #   self.parameter_max_values: dict of maximum parameter values
         pass
 
-    def drift_parameters(self):
+    def nonlinear_coeff(self, time_since_calibration):
+        """Returns a drift factor that starts at 0 and asymptotically approaches 1"""
+        return 1 / (1 + np.exp(-self.nonlinear_drift_k * (time_since_calibration - self.nonlinear_drift_n0)))
+
+    def drift_parameters(self, time=None):
+        if self.nonlinear_drift and time is not None:
+            time_since_calibration = time - self.last_calibration
+            nonlinear_coeff = self.nonlinear_coeff(time_since_calibration)
+        else:
+            nonlinear_coeff = 1
+
         for param in self.parameters:
-            if param == 'time' and 'rabi' in self.name:
-                pass
             # Decide drift direction
             if np.random.uniform() < self.drift_biases[param]:
                 direction = 1
             else:
                 direction = -1
-            drift = direction * self.drift_rates[param] * np.random.uniform()
+            drift = direction * self.drift_rates[param] * np.random.uniform() * nonlinear_coeff
             # Ensure that the new parameter is between the max and min values
             new_param = self.current_params[param] + drift
             new_param = max(self.parameter_min_values[param], new_param)
@@ -318,10 +330,10 @@ class FuncNode(Node, ABC):
         else:
             return 2
 
-    def simulate_failure(self):
+    def simulate_failure(self, time=None):
         # Used every step of the simulation, therefore must include drift
         # Simulate drift
-        self.drift_parameters()
+        self.drift_parameters(time)
 
         # A node can drift out of and back into spec. Allow it to do so.
         self.check_data_value = self._check_value()
@@ -575,9 +587,6 @@ class DependentExpDecayNode(ExpDecayFuncNode):
             'time': self.initial_params['time'],
             'decay_time': np.inf,
         }
-
-    def get_background(self):
-        return self.dependent_nodes['background_node'].exp_decay()
 
     def exp_decay(self):
         amp = self.current_params['amp']

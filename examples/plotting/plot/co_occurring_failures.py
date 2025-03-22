@@ -4,7 +4,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from plotting.test_data.data import fetch_large_sim_data
 
-from oaf.data_processing import find_co_occurring_failures
+from oaf.data_analysis import find_co_occurring_failures
 from oaf.plot.co_occuring_failures import plot
 
 wave_data, _, graph = fetch_large_sim_data()
