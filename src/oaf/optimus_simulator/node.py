@@ -228,11 +228,17 @@ class TrendNode(Node):
 
 class FuncNode(Node, ABC):
     def __init__(self, **kwargs):
-        # If randomize calibration is in kwargs, set the calibration randomization flag
+        # If node is not monitored for being in spec, then correctness data is not valid.
+        # Set this to off if correctness is not needed, as it greatly speeds up simulation.
+        self.monitor_in_spec = kwargs.get('monitor_in_spec', True)
         self.randomize_calibration = kwargs.get('randomize_calibration', False)
         self.nonlinear_drift = kwargs.get('nonlinear_drift', False)
         self.nonlinear_drift_k = kwargs.get('nonlinear_drift_k', 0.02)
         self.nonlinear_drift_n0 = kwargs.get('nonlinear_drift_n0', 200)
+
+        if not self.monitor_in_spec:
+            # Warn the user that correctness data is not valid and not monitored
+            print(f"WARNING: Node {self.name} is not monitoring in spec. Correctness data is not valid.")
 
         super().__init__(**kwargs)
         self.parameter_setup(**kwargs)
@@ -286,7 +292,7 @@ class FuncNode(Node, ABC):
         Perform the check evaluate results.
         """
         value = self._check_value()
-        return value > self.threshold
+        return value, value > self.threshold
 
     def calibrate(self, time):
         # Save the parameters right before calibration
@@ -335,11 +341,10 @@ class FuncNode(Node, ABC):
         # Simulate drift
         self.drift_parameters(time)
 
-        # A node can drift out of and back into spec. Allow it to do so.
-        self.check_data_value = self._check_value()
-        result = self.run_check()
-        self.failed = not result
-        self.failure_magnitude = self._check_failure_magnitude()
+        if self.monitor_in_spec:
+            self.check_data_value, result = self.run_check()
+            self.failed = not result
+        # self.failure_magnitude = self._check_failure_magnitude()
 
     def get_parameter_calibration_data(self):
         return self.params_before_calibration, self.params_after_calibration
@@ -932,6 +937,104 @@ class XGateNode(FuncNode):
         # Initial state is |-> to catch phase errors
         init_qubit_state = (qt.fock(2, 1) - qt.fock(2, 0)) / np.sqrt(2)
         sim = ms_gate.Simulator(mode_freq, eta, normal_coeff, tau, 1, rabi_freq, spin_phase_list=spin_phase)
+        sim.solve([0], [], sideband=False, carrier=True, init_qubit_state=init_qubit_state)
+
+        # Calculate fidelity of the X gate. X|-> = |->
+        final_state = sim.final_qubit_state
+
+        minus_state = (qt.fock(2, 0) - qt.fock(2, 1)).unit()
+        # Compute the density matrix of the ideal |-> state
+        rho_ideal = minus_state * minus_state.dag()
+        # Compute fidelity: F = Tr( sqrt( sqrt(rho_ideal) * rho_actual * sqrt(rho_ideal) ) )^2
+        fidelity = qt.fidelity(final_state, rho_ideal)
+
+        return fidelity
+
+    def _check_value(self):
+        """
+        Get the fidelity of the X gate
+        """
+        return self.simulate_X_gate_fidelity()
+
+
+class XGateSimpleNode(FuncNode):
+
+    def parameter_setup(self, **kwargs):
+        # Default values
+        defaults = {
+            'threshold': 0.98,  # Acceptable X gate fidelity
+
+            'omega': 2 * np.pi * 70e3,
+            'omega_drift_rate': 25077.5 / 75,  # value of 25077.5 leads being off the threshold
+            'omega_drift_bias': 0.6,
+
+            'time': 1.0 / 280e3,  # approximately 3.5us gate time
+            'time_drift_rate': 2.03633e-7 / 75,  # 2.03633e-7 leads to being off threshold
+            'time_drift_bias': 0.6,
+
+            'spin_phase': 0.,  # laser phase
+            'spin_phase_drift_rate': 0.0632 / 50,
+            'spin_phase_drift_bias': 0.4,
+        }
+
+        # Override defaults with kwargs if provided
+        for key, default in defaults.items():
+            setattr(self, key, kwargs.get(key, default))
+
+        self.parameters = [
+            'omega',
+            'time',
+            'spin_phase',
+        ]
+        self.initial_params = {
+            'omega': self.omega,
+            'time': self.time,
+            'spin_phase': self.spin_phase,
+        }
+        self.current_params = self.initial_params.copy()
+        self.threshold = self.threshold
+        self.drift_rates = {
+            'omega': self.omega_drift_rate,
+            'time': self.time_drift_rate,
+            'spin_phase': self.spin_phase_drift_rate,
+        }
+        self.drift_biases = {
+            'omega': self.omega_drift_bias,
+            'time': self.time_drift_bias,
+            'spin_phase': self.spin_phase_drift_bias,
+        }
+        self.parameter_min_values = {
+            'omega': 0.0,
+            'time': 0.0,
+            'spin_phase': -np.pi / 2,
+        }
+
+        self.parameter_max_values = {
+            'omega': np.inf,
+            'time': np.inf,
+            'spin_phase': np.pi / 2,
+        }
+
+        # Used to store parameter values before and after calibration
+        self.params_before_calibration = {}
+        self.params_after_calibration = {}
+
+    def simulate_X_gate_fidelity(self):
+        # Get the Rabi frequency from the dependent node
+        rabi_freq = self.dependent_nodes['rabi_freq_node'].get_rabi_freq()
+
+        omega = self.current_params['omega']
+        time = self.current_params['time']
+        spin_phase = self.current_params['spin_phase']
+
+        # The following are technically unused, but must be of the correct shape
+        mode_freq = np.array([13849904.48413065])
+        eta = np.array([0.1])
+        normal_coeff = np.array([[-1.04541242e-01]])
+
+        # Initial state is |-> to catch phase errors
+        init_qubit_state = (qt.fock(2, 1) - qt.fock(2, 0)) / np.sqrt(2)
+        sim = ms_gate.Simulator(mode_freq, eta, normal_coeff, time, 1, omega, spin_phase_list=spin_phase)
         sim.solve([0], [], sideband=False, carrier=True, init_qubit_state=init_qubit_state)
 
         # Calculate fidelity of the X gate. X|-> = |->

@@ -44,7 +44,9 @@ class QuantumCalibrationSimulator:
             # Step 0: Check all node correctness values and record. Simulation base truth
             current_ground_truth = {'time': self.current_time}
             for node_name, node in self.nodes.items():
-                current_ground_truth[node_name] = not node.failed
+                # Only record ground truth for nodes that are monitored
+                if node.monitor_in_spec:
+                    current_ground_truth[node_name] = not node.failed
             self.ground_truth.append(current_ground_truth)
 
             # Step 1: Check for timed out nodes
