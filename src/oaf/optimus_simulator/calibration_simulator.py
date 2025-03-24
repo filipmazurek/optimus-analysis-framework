@@ -162,6 +162,9 @@ class QuantumCalibrationSimulator:
 
         # check_data. Result of check_data is stored in node.failed as a proxy
         node.last_check = self.current_time
+        # FIXME: This is a workaround for the current implementation of monitor_in_spec
+        if not node.monitor_in_spec:
+            node.run_check_data()
         # Get all the check_data information from the node
         node_check_data = node.get_check_data()
 
