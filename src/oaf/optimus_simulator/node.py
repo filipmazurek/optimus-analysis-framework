@@ -27,7 +27,6 @@ class Node(ABC):
         self.cur_num_first_checks_delayed = 0
 
         # Flags for timeout-aware adaptive Optimus
-        self.first_check_delayed_flag = False
         self.long_lived_flag = False
 
         # For connecting to dependent nodes
@@ -80,18 +79,20 @@ class Node(ABC):
     def check_data(self, time):
         failed = self.failed
 
-        # If the timeout was increased and this is the first check since then, reset the timeout
-        if self.first_check_delayed_flag:
-            self.first_check_delayed_flag = False
-            self.timeout = self.base_timeout
+        # TODO: implement this correctly
+        # # If the node is long-lived, check if the 95th percentile ttf is greater than the current wait time value
+        # if self.check_long_lived_nodes and not self.long_lived_flag:
+        #     time_alive = max(self.last_calibration, self.last_check) - time
+        #     if time_alive > self.ninety_fifth_percentile_ttf:
+        #         self.timeout = self.base_timeout / 2
+        #         self.long_lived_flag = True
 
-        # If the node is long-lived, check if the 95th percentile ttf is greater than the current wait time value
-        if self.check_long_lived_nodes and not self.long_lived_flag:
-            time_alive = max(self.last_calibration, self.last_check) - time
-            if time_alive > self.ninety_fifth_percentile_ttf:
-                # TODO: set values that make sense
-                self.timeout = self.base_timeout / 2
-                self.long_lived_flag = True
+        if self.delay_first_check and self.cur_num_first_checks_delayed < self.num_first_checks_to_delay:
+            self.cur_num_first_checks_delayed += 1
+            # If there were already num_first_checks_to_delay checks delayed, reset the timeout
+            if self.cur_num_first_checks_delayed == self.num_first_checks_to_delay:
+                self.timeout = self.base_timeout
+
 
         return failed
 
@@ -107,14 +108,8 @@ class Node(ABC):
         self.long_lived_flag = False
 
         # Perform adaptive Optimus timeout adjustment
-        if self.delay_first_check and self.cur_num_first_checks_delayed < self.num_first_checks_to_delay:
-            # If the 5th percentile ttf is much greater than the current timeout, increase the timeout
-            # TODO: set values that make sense
-            if self.fifth_percentile_ttf > 3 * self.timeout:
-                self.cur_num_first_checks_delayed += 1
-                self.timeout = self.fifth_percentile_ttf / 3
-                if self.cur_num_first_checks_delayed == self.num_first_checks_to_delay:
-                    self.first_check_delayed_flag = True
+        if self.delay_first_check and self.fifth_percentile_ttf > 3 * self.timeout:
+            self.timeout = self.fifth_percentile_ttf / 3
 
 
 class SimpleNode(Node):
