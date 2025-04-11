@@ -37,6 +37,25 @@ class QuantumCalibrationSimulator:
         self.ground_truth = []
         self.node_parameter_data = []
 
+        self.node_dependency_list = {}
+
+# TODO: don't want to use B when coputing correctness, but only want to use it when computing what to calibrate next
+        # Create the dependency list for each node
+        for node_name, node in nodes.items():
+            dependency_nodes = []
+            def recurse(node):
+                for successor in self.graph.successors(node):
+                    # FIXME: this is only for the hidden node simulation
+                    if node == 'A' and successor == 'B':
+                        # Skip the connection between A and B
+                        continue
+                    if successor not in dependency_nodes:
+                        recurse(successor)
+                        dependency_nodes.append(successor)
+            recurse(node_name)
+            # Add to the node dependency list
+            self.node_dependency_list[node_name] = dependency_nodes
+
     def simulate(self, total_time_steps):
         """Run the simulation for a number of time steps."""
         while self.current_time < total_time_steps:
@@ -73,17 +92,22 @@ class QuantumCalibrationSimulator:
             self.current_time += self.time_step
 
     def _get_all_dependencies(self, node_name):
-        dependency_nodes = []
-
-        def recurse(node):
-            for successor in self.graph.successors(node):
-                if successor not in dependency_nodes:
-                    recurse(successor)
-                    dependency_nodes.append(successor)
-
-        recurse(node_name)
-
-        return dependency_nodes
+        return self.node_dependency_list[node_name]
+        # dependency_nodes = []
+        #
+        # def recurse(node):
+        #     for successor in self.graph.successors(node):
+        #         # FIXME: this is only for the hidden node simulation
+        #         if node.name =='A' and successor == 'B':
+        #             # Skip the connection between A and B
+        #             continue
+        #         if successor not in dependency_nodes:
+        #             recurse(successor)
+        #             dependency_nodes.append(successor)
+        #
+        # recurse(node_name)
+        #
+        # return dependency_nodes
 
     def _check_failure(self, node):
         """Check if any of the node's dependencies have failed. If so, the node is marked as failed as well."""
@@ -93,6 +117,7 @@ class QuantumCalibrationSimulator:
         if failed:
             return True
         # Check if any of the node's dependencies have failed
+        # TODO: This should be pre-computed
         dependencies = self._get_all_dependencies(node.name)
         return any(self.nodes[dep].failed for dep in dependencies)
 
@@ -163,6 +188,7 @@ class QuantumCalibrationSimulator:
         # check_data. Result of check_data is stored in node.failed as a proxy
         node.last_check = self.current_time
         # FIXME: This is a workaround for the current implementation of monitor_in_spec
+        #   Runs run_check_data to get the current check_data valuesd
         if not node.monitor_in_spec:
             node.run_check_data()
         # Get all the check_data information from the node
@@ -179,6 +205,7 @@ class QuantumCalibrationSimulator:
             return wave_data, check_data_results
 
         # If the node failed, start a diagnosis wave
+        # TODO: isn't this it? should be right
         successors = list(self.graph.successors(check_node))
         for successor in successors:
             result = self._check_node(successor, diagnosis=True)

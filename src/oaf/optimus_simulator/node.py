@@ -18,6 +18,7 @@ class Node(ABC):
         self.name = kwargs['name']
         self.base_timeout = kwargs['timeout']
         self.timeout = kwargs['timeout']
+        self.monitor_in_spec = kwargs.get('monitor_in_spec', True)
         self.failed = False
         self.last_calibration = 0.
         self.last_check = 0.
@@ -82,7 +83,7 @@ class Node(ABC):
         # TODO: implement this correctly
         # # If the node is long-lived, check if the 95th percentile ttf is greater than the current wait time value
         # if self.check_long_lived_nodes and not self.long_lived_flag:
-        #     time_alive = max(self.last_calibration, self.last_check) - time
+        #     time_alive = self.last_calibration - time
         #     if time_alive > self.ninety_fifth_percentile_ttf:
         #         self.timeout = self.base_timeout / 2
         #         self.long_lived_flag = True
@@ -227,7 +228,6 @@ class FuncNode(Node, ABC):
         # Set this to off if correctness is not needed, as it greatly speeds up simulation.
         # TODO: with how the simulator is set up, it drifts parameters and checks for correctness at every step.
         #   Need to rearrange how that is. Otherwise the node will never fail because it is technically never checked.
-        self.monitor_in_spec = kwargs.get('monitor_in_spec', True)
         self.randomize_calibration = kwargs.get('randomize_calibration', False)
         self.nonlinear_drift = kwargs.get('nonlinear_drift', False)
         self.nonlinear_drift_k = kwargs.get('nonlinear_drift_k', 0.02)
@@ -537,9 +537,7 @@ class DependentExpDecayNode(ExpDecayFuncNode):
         defaults = {
             'amp': 1.0,
             'decay_time': 10.0,  # time in µs
-
             'threshold': 0.992,  # Acceptable population threshold. Desire 99.9%
-
             # Drift rate in absolute units. Will be multiplied by a random number between -1 and 1
             'amp_drift_rate': 7 / 75,  # value of 7 leads to being off the threshold
             # Bias positive drift. 0.5 is no bias, 0 is always negative, 1 is always positive
@@ -1169,3 +1167,4 @@ class XGateSelfCorrectingeNode(FuncNode):
                 new_param = self.initial_params[param]
 
             self.current_params[param] = new_param
+

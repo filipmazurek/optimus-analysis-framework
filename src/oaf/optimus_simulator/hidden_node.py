@@ -7,7 +7,8 @@ class HiddenNode(FuncNode):
     such as temporary voltage noise or ambient temperature fluctuations.
     """
 
-    def simulate_failure(self):
+    def simulate_failure(self, time=None):
+        # Override the simulate_failure method to only drift parameters
         # Used every step of the simulation, simulate drift
         self.drift_parameters()
 
@@ -67,7 +68,7 @@ class CompensatingExpDecayNode(ExpDecayFuncNode):
         assert 'dependent_nodes' in kwargs
         assert 'dependence' in kwargs['dependent_nodes']
         # dependent_nodes must be of the type HiddenNode
-        assert isinstance(kwargs['dependent_nodes']['dependence'], HiddenNode)
+        assert hasattr(kwargs['dependent_nodes']['dependence'], 'get_param')
         super().__init__(**kwargs)
 
 
