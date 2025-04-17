@@ -15,9 +15,10 @@ class Node(ABC):
         assert 'name' in kwargs
         assert 'timeout' in kwargs
 
+
         self.name = kwargs['name']
         self.base_timeout = kwargs['timeout']
-        self.timeout = kwargs['timeout']
+        self.timeout = kwargs['timeout'] + kwargs.get('timeout_offset', 0.)
         self.monitor_in_spec = kwargs.get('monitor_in_spec', True)
         self.failed = False
         self.last_calibration = 0.
